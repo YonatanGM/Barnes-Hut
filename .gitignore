@@ -1,3 +1,4 @@
+py-simulation-test/venv
 # Prerequisites
 *.d
 
@@ -31,3 +32,5 @@
 *.out
 *.app
 simulation_data
+.idea
+.vscode
