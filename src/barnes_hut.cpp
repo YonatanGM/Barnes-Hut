@@ -1,6 +1,7 @@
 #include "barnes_hut.h"
 #include <cmath>
 #include <limits>
+#include <vector>
 
 // Build the octree from the list of bodies
 void buildOctree(const std::vector<Body*>& bodies, OctreeNode*& root) {
