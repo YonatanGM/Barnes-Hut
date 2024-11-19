@@ -148,7 +148,7 @@ int main(int argc, char* argv[]) {
         step++;
 
         // Compute accelerations at new positions
-        // computeAccelerations(bodies, G, theta, softening);
+        computeAccelerations(bodies, G, theta, softening);
 
         // Update velocities to full step using new accelerations
         for (auto& body : bodies) {
