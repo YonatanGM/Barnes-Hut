@@ -42,10 +42,10 @@ bool readCSV(const std::string& filename, std::vector<Body*>& bodies) {
     }
 
     // Debugging: Print parsed headers
-    std::cerr << "Parsed headers:\n";
-    for (const auto& [key, value] : headerMap) {
-        std::cerr << "  " << key << ": " << value << "\n";
-    }
+    // std::cerr << "Parsed headers:\n";
+    // for (const auto& [key, value] : headerMap) {
+    //     std::cerr << "  " << key << ": " << value << "\n";
+    // }
 
     // Validate required headers
     std::vector<std::string> requiredHeaders = {"mass", "pos_x", "pos_y", "pos_z", "vel_x", "vel_y", "vel_z"};
