@@ -80,7 +80,7 @@ int main(int argc, char* argv[]) {
     double dt = 1.0; // Time step in days
     double t_end = 365.25; // End time in days (default 1 year)
     double vs = 1.0; // Visualization step width in days
-    std::string vs_dir = "sim_out"; // Visualization output directory
+    std::string vs_dir = "sim"; // Visualization output directory
     std::string filename; // Input file
 
     // Parse command-line arguments
@@ -150,11 +150,11 @@ int main(int argc, char* argv[]) {
         // Compute accelerations at new positions
         computeAccelerations(bodies, G, theta, softening);
 
-        // Update velocities to full step using new accelerations
+        // Update velocities by another half step using new accelerations
         for (auto& body : bodies) {
-            body->vx += body->ax * dt;
-            body->vy += body->ay * dt;
-            body->vz += body->az * dt;
+            body->vx += body->ax * dt * 0.5;
+            body->vy += body->ay * dt * 0.5;
+            body->vz += body->az * dt * 0.5;
         }
 
         // Output visualization data 
