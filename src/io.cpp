@@ -7,6 +7,7 @@
 #include <random>
 #include <cmath>
 #include <unordered_map>
+#include <iomanip> 
 
 using namespace std; 
 
@@ -113,10 +114,12 @@ bool readCSV(const std::string& filename, std::vector<Body*>& bodies) {
     return true;
 }
 
-
+// Function to write the bodies to csv for visualization 
 void saveState(const std::string& vs_dir, int vs_counter, const std::vector<Body*>& bodies) {
-    // Create the file path
-    std::string vs_filename = vs_dir + "/output_" + std::to_string(vs_counter) + ".csv";
+    // Create the file path with zero-padded suffix
+    std::ostringstream vs_filename_stream;
+    vs_filename_stream << vs_dir << "/output_" << std::setw(5) << std::setfill('0') << vs_counter << ".csv";
+    std::string vs_filename = vs_filename_stream.str();
 
     // Open the file
     std::ofstream vs_file(vs_filename);
