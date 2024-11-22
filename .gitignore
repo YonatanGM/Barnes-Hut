@@ -67,7 +67,7 @@ venv/
 __pycache__/
 
 # Simulation data and output files
-*.csv
+# *.csv
 *.dat
 *.log
 
