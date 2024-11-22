@@ -345,7 +345,6 @@ bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::st
 }
 
 
-// Function to combine two CSV files into one, removing duplicates based on the name column
 void combineCSVFiles(const std::string& inputFile1, const std::string& inputFile2, const std::string& outputFile) {
     std::ifstream file1(inputFile1);
     std::ifstream file2(inputFile2);
@@ -358,6 +357,7 @@ void combineCSVFiles(const std::string& inputFile1, const std::string& inputFile
 
     std::unordered_set<std::string> uniqueNames; // To track already included "name" values
     std::string line;
+    int currentID = 0; // Continuous ID starting from 0
 
     // Read and write headers (assuming both files have the same headers)
     if (std::getline(file1, line)) {
@@ -387,7 +387,12 @@ void combineCSVFiles(const std::string& inputFile1, const std::string& inputFile
                     if (!name.empty()) {
                         uniqueNames.insert(name);
                     }
-                    output << line << "\n";
+                    tokens[0] = std::to_string(currentID++); // Update the ID column to be continuous
+                    for (size_t i = 0; i < tokens.size(); ++i) {
+                        output << tokens[i];
+                        if (i < tokens.size() - 1) output << ","; // Add commas between tokens
+                    }
+                    output << "\n";
                 }
             }
         }
