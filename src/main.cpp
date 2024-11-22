@@ -73,7 +73,7 @@ void computeAccelerations(std::vector<Body*>& bodies, double G, double theta, do
 
 int main(int argc, char* argv[]) {
     // Adjusted G in AU^3 kg^-1 day^-2
-    const double G = 6.67430e-11 * 86400 * 86400 / (1.496e11 * 1.496e11 * 1.496e11);
+    const double G = 1.48812e-34;
     std::cout << "G: " << G << std::endl; 
     double softening = 1e-11; // Softening parameter in AU
     double theta = 0.5; // Barnes-Hut threshold parameter
