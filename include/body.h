@@ -14,4 +14,4 @@ struct Body {
     // std::string name;   // name of the body
 };
 
-#endif // BODY_H
+#endif 
