@@ -17,4 +17,4 @@ bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::st
 // Function to combine two CSV files into one, removing duplicates based on the "name" column
 void combineCSVFiles(const std::string& inputFile1, const std::string& inputFile2, const std::string& outputFile);
 
-#endif // IO_H
+#endif 
