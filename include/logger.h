@@ -2,14 +2,16 @@
 #define LOGGER_H
 
 #include <iostream>
-#include <string>
 
-class Logger {
-public:
-    static void initialize(bool enabled);
-    static void log(int rank_to_print, int rank, const std::string& msg);
-private:
-    static bool logging_enabled;
-};
+// global flag to control whether logging is enabled
+inline bool logging_enabled = false;
+
+// simplified macro for logging
+#define LOG(rank_to_print, msg) \
+    do { \
+        if (logging_enabled && rank == rank_to_print) { \
+            std::cout << "[Rank " << rank << "] " << msg << std::endl; \
+        } \
+    } while (0)
 
 #endif
