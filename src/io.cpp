@@ -11,8 +11,19 @@
 #include <unordered_set>
 
 using namespace std; 
-using namespace std; 
 
+
+/**
+ * @brief Reads bodies data from a CSV file.
+ *
+ * Reads masses, positions, and velocities of bodies from the specified CSV file.
+ *
+ * @param filename Path to the CSV file.
+ * @param masses Vector to store masses.
+ * @param positions Vector to store positions.
+ * @param velocities Vector to store velocities.
+ * @return True if reading was successful, false otherwise.
+ */
 bool readCSV(const std::string& filename,
              std::vector<double>& masses,
              std::vector<Position>& positions,
@@ -96,6 +107,18 @@ bool readCSV(const std::string& filename,
     return true;
 }
 
+
+/**
+ * @brief Saves the current state of the simulation to a CSV file.
+ *
+ * Writes masses, positions, and velocities of all bodies to a CSV file for visualization.
+ *
+ * @param vs_dir Directory to save the visualization files.
+ * @param vs_counter Counter for the visualization step (used in filename).
+ * @param masses Vector of masses.
+ * @param positions Vector of positions.
+ * @param velocities Vector of velocities.
+ */
 void saveState(const std::string& vs_dir, int vs_counter,
                const std::vector<double>& masses,
                const std::vector<Position>& positions,

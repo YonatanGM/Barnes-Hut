@@ -27,8 +27,11 @@ double parseTime(const std::string& timeStr) {
     }
 }
 
-// Creates an MPI datatype for the Position structure
 
+/**
+ * @brief Creates an MPI datatype for the Position structure.
+ * @param MPI_POSITION Pointer to the MPI_Datatype to be created.
+ */
 void createMPIPositionType(MPI_Datatype* MPI_POSITION) {
     int lengths[3] = {1, 1, 1};
     MPI_Aint displacements[3];
@@ -43,7 +46,10 @@ void createMPIPositionType(MPI_Datatype* MPI_POSITION) {
 }
 
 
-// Creates an MPI datatype for the Velocity structure
+/**
+ * @brief Creates an MPI datatype for the Velocity structure.
+ * @param MPI_VELOCITY Pointer to the MPI_Datatype to be created.
+ */
 void createMPIVelocityType(MPI_Datatype* MPI_VELOCITY) {
     int lengths[3] = {1, 1, 1};
     MPI_Aint displacements[3];
@@ -58,7 +64,10 @@ void createMPIVelocityType(MPI_Datatype* MPI_VELOCITY) {
 }
 
 
-// Creates an MPI datatype for the Acceleration structure
+/**
+ * @brief Creates an MPI datatype for the Acceleration structure.
+ * @param MPI_ACCELERATION Pointer to the MPI_Datatype to be created.
+ */
 void createMPIAccelerationType(MPI_Datatype* MPI_ACCELERATION) {
     int lengths[3] = {1, 1, 1};
     MPI_Aint displacements[3];
@@ -72,11 +81,18 @@ void createMPIAccelerationType(MPI_Datatype* MPI_ACCELERATION) {
     MPI_Type_commit(MPI_ACCELERATION);
 }
 
+
+/**
+ * @brief Main function for the N-Body Simulation with MPI & Barnes-Hut algorithm.
+ *
+ * This function initializes MPI, parses command-line arguments, sets up the simulation parameters,
+ * distributes data among processes, and runs the main simulation loop.
+ */
 int main(int argc, char* argv[]) {
     int provided;
 
     // Initialize MPI with thread support
-    MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
 
     // Check the level of thread support provided
     if (provided < MPI_THREAD_FUNNELED) {
@@ -108,8 +124,10 @@ int main(int argc, char* argv[]) {
 
     // Command-line argument parsing
     try {
+        // Set up command-line options using cxxopts
         cxxopts::Options options(argv[0], "N-Body Simulation with MPI & Barnes-Hut");
         options.add_options()
+            // Define command-line options
             ("f,file", "Input file", cxxopts::value<std::string>())
             ("d,dt", "Time step (e.g., 1d)", cxxopts::value<std::string>()->default_value("1d"))
             ("t,t_end", "End time (e.g., 1y)", cxxopts::value<std::string>()->default_value("1y"))
@@ -120,14 +138,17 @@ int main(int argc, char* argv[]) {
             ("log", "Enable logging")
             ("h,help", "Show usage");
 
+        // Parse the command-line arguments
         auto result = options.parse(argc, argv);
 
+        // If help is requested, display usage and exit
         if (result.count("help")) {
             if (rank == 0) std::cout << options.help() << std::endl;
             MPI_Finalize();
             return 0;
         }
 
+        // Check if logging is enabled
         logging_enabled = result.count("log");
 
         // Get input filename
@@ -158,7 +179,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Log the maximum number of threads available
     LOG(rank, "Maximum threads available: " << omp_get_max_threads());
+
+    // Log the number of threads in use
     #pragma omp parallel
     {
         #pragma omp single
@@ -182,11 +206,11 @@ int main(int argc, char* argv[]) {
     }
 
     // Read input file and initialize masses, positions, and velocities
-    std::vector<double> masses;
-    std::vector<Position> positions;
-    std::vector<Velocity> velocities;
+    std::vector<double> masses;            // Vector to store masses of bodies
+    std::vector<Position> positions;       // Vector to store positions of bodies
+    std::vector<Velocity> velocities;      // Vector to store velocities of bodies
 
-    int num_bodies = 0;
+    int num_bodies = 0; // Total number of bodies in the simulation
     if (rank == 0) {
         if (!readCSV(filename, masses, positions, velocities)) {
             std::cerr << "Error: Could not read file: " << filename << std::endl;
@@ -216,21 +240,22 @@ int main(int argc, char* argv[]) {
     int remainder = num_bodies % size;       // Extra bodies to distribute
 
     std::vector<int> sendcounts(size); // Number of bodies each process will receive
-    std::vector<int> displs(size, 0);     // Displacement (starting index) for each process
+    std::vector<int> displs(size, 0);  // Displacement (starting index) for each process
 
     int offset = 0;
     for (int i = 0; i < size; ++i) {
-        sendcounts[i] = bodies_per_proc + (i < remainder ? 1 : 0); // Distribute extra bodies to first 'remainder' processes
-        displs[i] += sendcounts[i];
+        sendcounts[i] = bodies_per_proc + (i < remainder ? 1 : 0);
+        displs[i] = offset;
+        offset += sendcounts[i];
     }
 
-    int local_n = sendcounts[rank];            // Number of bodies for this process
+    int local_n = sendcounts[rank]; // Number of bodies for this process
 
-    // Local data
-    std::vector<double> local_masses(local_n);
-    std::vector<Position> local_positions(local_n);
-    std::vector<Velocity> local_velocities(local_n);
-    std::vector<Acceleration> local_accelerations(local_n);
+    // Local data for each process
+    std::vector<double> local_masses(local_n);              // Local masses
+    std::vector<Position> local_positions(local_n);         // Local positions
+    std::vector<Velocity> local_velocities(local_n);        // Local velocities
+    std::vector<Acceleration> local_accelerations(local_n); // Local accelerations
 
     // Scatter masses to all processes
     MPI_Scatterv(masses.data(), sendcounts.data(), displs.data(), MPI_DOUBLE,
@@ -283,9 +308,7 @@ int main(int argc, char* argv[]) {
 
         // Output visualization data at specified intervals
         if (t >= vs_counter * vs) {
-            // Gather positions and velocities to the main rank
-            // MPI_Gatherv(local_positions.data(), local_n, MPI_POSITION,
-            //             positions.data(), sendcounts.data(), displs.data(), MPI_POSITION, 0, MPI_COMM_WORLD);
+            // Gather velocities to the main rank
             MPI_Gatherv(local_velocities.data(), local_n, MPI_VELOCITY,
                         velocities.data(), sendcounts.data(), displs.data(), MPI_VELOCITY, 0, MPI_COMM_WORLD);
 
