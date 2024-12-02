@@ -51,8 +51,25 @@ target_compile_definitions(${LIBRARY_NAME} PUBLIC _USE_MATH_DEFINES)
 ##                                    check for optional and necessary dependencies                                   ##
 ########################################################################################################################
 ## OpenMP and MPI are required for this LabCourse
-# find_package(OpenMP REQUIRED)
-# target_link_libraries(${LIBRARY_NAME} PUBLIC OpenMP::OpenMP_CXX)
+if(APPLE)
+    set(CMAKE_C_COMPILER clang)
+    set(CMAKE_CXX_COMPILER clang++)
+
+    # OpenMP configuration
+    set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/Cellar/libomp/19.1.4/include")
+    set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/Cellar/libomp/19.1.4/include")
+    set(OpenMP_C_LIB_NAMES "omp")
+    set(OpenMP_omp_LIBRARY "/usr/local/Cellar/libomp/19.1.4/lib/libomp.dylib")
+
+    # Update CMake flags
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/Cellar/libomp/19.1.4/lib -lomp")
+endif()
+
+
+
+find_package(OpenMP REQUIRED)
+target_link_libraries(${LIBRARY_NAME} PUBLIC OpenMP::OpenMP_CXX)
 
 find_package(MPI REQUIRED)
 target_link_libraries(${LIBRARY_NAME} PUBLIC MPI::MPI_CXX)
