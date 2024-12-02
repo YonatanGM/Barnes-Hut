@@ -35,5 +35,4 @@ private:
     void createChild(int index);
 };
 
-
-#endif // OCTREE_H
+#endif 
