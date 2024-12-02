@@ -25,7 +25,6 @@ set(LIBRARY_SOURCES
     src/integration.cpp
     src/io.cpp
     src/kepler_to_cartesian.cpp
-    src/logger.cpp
 )
 
 # create library
