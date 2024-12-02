@@ -1,7 +1,13 @@
 #include "octree.h"
-#include <cmath>
-#include <limits>
 
+/**
+ * @brief Constructor for OctreeNode.
+ *
+ * @param xCenter X-coordinate of the node's center
+ * @param yCenter Y-coordinate of the node's center
+ * @param zCenter Z-coordinate of the node's center
+ * @param size    Size of the node (length of one side)
+ */
 OctreeNode::OctreeNode(double xCenter, double yCenter, double zCenter, double size)
     : mass(0.0), comX(0.0), comY(0.0), comZ(0.0), size(size),
       xCenter(xCenter), yCenter(yCenter), zCenter(zCenter),
@@ -9,71 +15,93 @@ OctreeNode::OctreeNode(double xCenter, double yCenter, double zCenter, double si
     children.fill(nullptr);
 }
 
+/**
+ * @brief Destructor for OctreeNode.
+ */
 OctreeNode::~OctreeNode() {
     clear();
 }
 
-void OctreeNode::insertBody(int newBodyIndex, const std::vector<Body>& bodies) {
-    const Body& newBody = bodies[newBodyIndex];
+/**
+ * @brief Inserts a body into the octree node.
+ *
+ * @param newBodyIndex Index of the body to insert
+ * @param masses       Vector of masses
+ * @param positions    Vector of positions
+ */
+void OctreeNode::insertBody(int newBodyIndex, const std::vector<double>& masses, const std::vector<Position>& positions) {
+    const Position& newBodyPos = positions[newBodyIndex];
+    double newBodyMass = masses[newBodyIndex];
 
     if (isLeaf) {
         if (bodyIndex == -1) {
             // Leaf node is empty; insert the body here
             bodyIndex = newBodyIndex;
-            mass = newBody.mass;
-            comX = newBody.x;
-            comY = newBody.y;
-            comZ = newBody.z;
+            mass = newBodyMass;
+            comX = newBodyPos.x;
+            comY = newBodyPos.y;
+            comZ = newBodyPos.z;
         } else {
             // Leaf node already has a body; need to subdivide
             int existingBodyIndex = bodyIndex;
+            const Position& existingBodyPos = positions[existingBodyIndex];
+            double existingBodyMass = masses[existingBodyIndex];
             bodyIndex = -1;
             isLeaf = false;
 
             // Re-insert the existing body
-            int existingOctant = getOctant(existingBodyIndex, bodies);
+            int existingOctant = getOctant(existingBodyPos);
             createChild(existingOctant);
-            children[existingOctant]->insertBody(existingBodyIndex, bodies);
+            children[existingOctant]->insertBody(existingBodyIndex, masses, positions);
 
             // Insert the new body
-            int newOctant = getOctant(newBodyIndex, bodies);
+            int newOctant = getOctant(newBodyPos);
             if (children[newOctant] == nullptr) {
                 createChild(newOctant);
             }
-            children[newOctant]->insertBody(newBodyIndex, bodies);
+            children[newOctant]->insertBody(newBodyIndex, masses, positions);
 
             // Update mass and center of mass
-            const Body& existingBody = bodies[existingBodyIndex];
-            mass = existingBody.mass + newBody.mass;
-            comX = (existingBody.mass * existingBody.x + newBody.mass * newBody.x) / mass;
-            comY = (existingBody.mass * existingBody.y + newBody.mass * newBody.y) / mass;
-            comZ = (existingBody.mass * existingBody.z + newBody.mass * newBody.z) / mass;
+            mass = existingBodyMass + newBodyMass;
+            comX = (existingBodyMass * existingBodyPos.x + newBodyMass * newBodyPos.x) / mass;
+            comY = (existingBodyMass * existingBodyPos.y + newBodyMass * newBodyPos.y) / mass;
+            comZ = (existingBodyMass * existingBodyPos.z + newBodyMass * newBodyPos.z) / mass;
         }
     } else {
         // Internal node; update mass and center of mass
-        mass += newBody.mass;
-        comX = (comX * (mass - newBody.mass) + newBody.mass * newBody.x) / mass;
-        comY = (comY * (mass - newBody.mass) + newBody.mass * newBody.y) / mass;
-        comZ = (comZ * (mass - newBody.mass) + newBody.mass * newBody.z) / mass;
+        mass += newBodyMass;
+        comX = (comX * (mass - newBodyMass) + newBodyMass * newBodyPos.x) / mass;
+        comY = (comY * (mass - newBodyMass) + newBodyMass * newBodyPos.y) / mass;
+        comZ = (comZ * (mass - newBodyMass) + newBodyMass * newBodyPos.z) / mass;
 
         // Insert the body into the appropriate child
-        int octant = getOctant(newBodyIndex, bodies);
+        int octant = getOctant(newBodyPos);
         if (children[octant] == nullptr) {
             createChild(octant);
         }
-        children[octant]->insertBody(newBodyIndex, bodies);
+        children[octant]->insertBody(newBodyIndex, masses, positions);
     }
 }
 
-int OctreeNode::getOctant(int bodyIndex, const std::vector<Body>& bodies) {
-    const Body& body = bodies[bodyIndex];
+/**
+ * @brief Determines the octant for a body relative to this node.
+ *
+ * @param position Position of the body
+ * @return Octant index (0-7)
+ */
+int OctreeNode::getOctant(const Position& position) {
     int octant = 0;
-    if (body.x >= xCenter) octant |= 1;
-    if (body.y >= yCenter) octant |= 2;
-    if (body.z >= zCenter) octant |= 4;
+    if (position.x >= xCenter) octant |= 1;
+    if (position.y >= yCenter) octant |= 2;
+    if (position.z >= zCenter) octant |= 4;
     return octant;
 }
 
+/**
+ * @brief Creates a child node in the specified octant.
+ *
+ * @param index Octant index (0-7)
+ */
 void OctreeNode::createChild(int index) {
     double offset = size / 4.0;
     double childSize = size / 2.0;
@@ -83,6 +111,9 @@ void OctreeNode::createChild(int index) {
     children[index] = new OctreeNode(childXCenter, childYCenter, childZCenter, childSize);
 }
 
+/**
+ * @brief Clears the octree node and its children.
+ */
 void OctreeNode::clear() {
     for (auto& child : children) {
         if (child) {

@@ -1,17 +1,31 @@
-
 #ifndef BODY_H
 #define BODY_H
 
-#include <string>
-
-// structure representing a celestial body
-struct Body {
-    int index;             // unique index of body 
-    double mass;        // mass of the body
-    double x, y, z;     // position coordinates
-    double vx, vy, vz;  // velocity components
-    double ax, ay, az;  // acceleration components
-    // std::string name;   // name of the body
+/**
+ * @brief Structure representing a body's position.
+ */
+struct Position {
+    double x;
+    double y;
+    double z;
 };
 
-#endif 
+/**
+ * @brief Structure representing a body's velocity.
+ */
+struct Velocity {
+    double vx;
+    double vy;
+    double vz;
+};
+
+/**
+ * @brief Structure representing a body's acceleration.
+ */
+struct Acceleration {
+    double ax;
+    double ay;
+    double az;
+};
+
+#endif // BODY_H

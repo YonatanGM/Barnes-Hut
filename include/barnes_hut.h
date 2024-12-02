@@ -1,17 +1,38 @@
 #ifndef BARNES_HUT_H
 #define BARNES_HUT_H
 
+#include <vector>
 #include "body.h"
 #include "octree.h"
-#include <omp.h>
 
-// Build the octree from the list of bodies
-void buildOctree(const std::vector<Body>& bodies, OctreeNode*& root);
+/**
+ * @brief Computes accelerations for local bodies using the Barnes-Hut algorithm.
+ *
+ * @param masses           Vector of all masses.
+ * @param positions        Vector of all positions.
+ * @param local_masses     Vector of local masses.
+ * @param local_positions  Vector of local positions.
+ * @param local_accelerations Vector to store computed accelerations for local bodies.
+ * @param G                Gravitational constant.
+ * @param theta            Barnes-Hut opening angle parameter.
+ * @param softening        Softening parameter to prevent singularities.
+ */
+void computeAccelerations(const std::vector<double>& masses,
+                          const std::vector<Position>& positions,
+                          const std::vector<double>& local_masses,
+                          const std::vector<Position>& local_positions,
+                          std::vector<Acceleration>& local_accelerations,
+                          double G, double theta, double softening);
 
-// Compute forces on a body using the Barnes-Hut algorithm
-void computeForcesBarnesHut(Body& body, OctreeNode* node, double theta, double G, double softening, const std::vector<Body>& bodies);
 
-void computeAccelerations(std::vector<Body>& bodies, std::vector<Body>& local_bodies, double G, double theta, double softening);
+
+void computeForceBarnesHut(double mass, const Position& position, Acceleration& acceleration,
+                           OctreeNode* node, double G, double theta, double softening);
+
+void buildOctree(const std::vector<double>& masses, const std::vector<Position>& positions, OctreeNode*& root);
 
 
 #endif 
+
+
+

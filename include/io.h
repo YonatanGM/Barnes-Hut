@@ -6,10 +6,17 @@
 #include "body.h"
 
 // function to read bodies from a CSV file
-bool readCSV(const std::string& filename, std::vector<Body>& bodies);
+bool readCSV(const std::string& filename,
+             std::vector<double>& masses,
+             std::vector<Position>& positions,
+             std::vector<Velocity>& velocities);
 
 // function to save the state of bodies to a CSV file
-void saveState(const std::string& vs_dir, int vs_counter, const std::vector<Body>& bodies);
+void saveState(const std::string& vs_dir, int vs_counter,
+               const std::vector<double>& masses,
+               const std::vector<Position>& positions,
+               const std::vector<Velocity>& velocities);
+
 
 // Function to convert orbital elements CSV to state vector CSV
 bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::string& outputFilename);

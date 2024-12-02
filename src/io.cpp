@@ -11,8 +11,12 @@
 #include <unordered_set>
 
 using namespace std; 
+using namespace std; 
 
-bool readCSV(const std::string& filename, std::vector<Body>& bodies) {
+bool readCSV(const std::string& filename,
+             std::vector<double>& masses,
+             std::vector<Position>& positions,
+             std::vector<Velocity>& velocities) {
     std::ifstream file(filename);
     if (!file.is_open()) {
         std::cerr << "Error opening CSV file: " << filename << std::endl;
@@ -21,13 +25,13 @@ bool readCSV(const std::string& filename, std::vector<Body>& bodies) {
 
     std::string line;
 
-    // read the header line
+    // Read the header line
     if (!std::getline(file, line)) {
         std::cerr << "Empty file or error reading CSV file: " << filename << std::endl;
         return false;
     }
 
-    // process the header to map column names to indices
+    // Process the header to map column names to indices
     std::istringstream headerStream(line);
     std::vector<std::string> headers;
     std::string header;
@@ -35,13 +39,13 @@ bool readCSV(const std::string& filename, std::vector<Body>& bodies) {
         headers.push_back(header);
     }
 
-    // map headers to indices
+    // Map headers to indices
     std::unordered_map<std::string, int> headerMap;
     for (size_t i = 0; i < headers.size(); ++i) {
         headerMap[headers[i]] = static_cast<int>(i);
     }
 
-    // validate required headers
+    // Validate required headers
     std::vector<std::string> requiredHeaders = {"mass", "pos_x", "pos_y", "pos_z", "vel_x", "vel_y", "vel_z"};
     for (const std::string& header : requiredHeaders) {
         if (headerMap.find(header) == headerMap.end()) {
@@ -50,53 +54,39 @@ bool readCSV(const std::string& filename, std::vector<Body>& bodies) {
         }
     }
 
+    masses.clear();
+    positions.clear();
+    velocities.clear();
+
     while (std::getline(file, line)) {
         std::istringstream iss(line);
         std::vector<std::string> tokens;
         std::string token;
 
-        // split the line into tokens
+        // Split the line into tokens
         while (std::getline(iss, token, ',')) {
             tokens.push_back(token);
         }
 
-        // create a new Body
-        Body body;
-        int id = 0;
-
         try {
-            // name (optional)
-            if (headerMap.count("name") && headerMap["name"] < tokens.size() && !tokens[headerMap["name"]].empty()) {
-                // body.name = tokens[headerMap["name"]];
-            } else {
-                // body.name = ""; // default to empty string
-            }
+            // Mass
+            double mass = std::stod(tokens.at(headerMap.at("mass")));
+            masses.push_back(mass);
 
-            // mass (required)
-            body.mass = std::stod(tokens.at(headerMap.at("mass")));
+            // Position components (pos_x, pos_y, pos_z)
+            double x = std::stod(tokens.at(headerMap.at("pos_x")));
+            double y = std::stod(tokens.at(headerMap.at("pos_y")));
+            double z = std::stod(tokens.at(headerMap.at("pos_z")));
+            positions.push_back({x, y, z});
 
-            // position components (pos_x, pos_y, pos_z - required)
-            body.x = std::stod(tokens.at(headerMap.at("pos_x")));
-            body.y = std::stod(tokens.at(headerMap.at("pos_y")));
-            body.z = std::stod(tokens.at(headerMap.at("pos_z")));
-
-            // velocity components (vel_x, vel_y, vel_z - required)
-            body.vx = std::stod(tokens.at(headerMap.at("vel_x")));
-            body.vy = std::stod(tokens.at(headerMap.at("vel_y")));
-            body.vz = std::stod(tokens.at(headerMap.at("vel_z")));
-
-            // initialize accelerations to zero
-            body.ax = 0.0;
-            body.ay = 0.0;
-            body.az = 0.0;
-
-            // add the body to the list
-            body.index = id;
-            bodies.push_back(body);
-            id++;
+            // Velocity components (vel_x, vel_y, vel_z)
+            double vx = std::stod(tokens.at(headerMap.at("vel_x")));
+            double vy = std::stod(tokens.at(headerMap.at("vel_y")));
+            double vz = std::stod(tokens.at(headerMap.at("vel_z")));
+            velocities.push_back({vx, vy, vz});
 
         } catch (const std::exception& ex) {
-            // log error and skip this row
+            // Log error and skip this row
             std::cerr << "Error parsing line. Skipping: " << line << "\n";
             std::cerr << "Exception: " << ex.what() << "\n";
         }
@@ -106,40 +96,36 @@ bool readCSV(const std::string& filename, std::vector<Body>& bodies) {
     return true;
 }
 
-void saveState(const std::string& vs_dir, int vs_counter, const std::vector<Body>& bodies) {
-    // create the file path with zero-padded suffix
+void saveState(const std::string& vs_dir, int vs_counter,
+               const std::vector<double>& masses,
+               const std::vector<Position>& positions,
+               const std::vector<Velocity>& velocities) {
+    // Create the file path with zero-padded suffix
     std::ostringstream vs_filename_stream;
     vs_filename_stream << vs_dir << "/output_" << std::setw(5) << std::setfill('0') << vs_counter << ".csv";
     std::string vs_filename = vs_filename_stream.str();
 
-    // debug: print the filename being used
-    // std::cout << "Process 0 saving state to file: " << vs_filename << std::endl;
-
-    // open the file
+    // Open the file
     std::ofstream vs_file(vs_filename);
     if (!vs_file.is_open()) {
         std::cerr << "Failed to open visualization file: " << vs_filename << std::endl;
         // exit(1); // Comment out exit to allow the simulation to continue
     } else {
-        // write header
-        vs_file << "id,x,y,z,vx,vy,vz\n";
+        // Write header
+        vs_file << "id,mass,x,y,z,vx,vy,vz\n";
 
-        // write data
-        for (const auto& body : bodies) {
-            vs_file << body.index << ","
-                    << body.x << ","
-                    << body.y << ","
-                    << body.z << ","
-                    << body.vx << ","
-                    << body.vy << ","
-                    << body.vz << "\n";
+        // Write data
+        for (size_t i = 0; i < masses.size(); ++i) {
+            vs_file << i << ","                       // Write id starting from 0
+                    << masses[i] << ","
+                    << positions[i].x << "," << positions[i].y << "," << positions[i].z << ","
+                    << velocities[i].vx << "," << velocities[i].vy << "," << velocities[i].vz << "\n";
         }
         vs_file.close();
-        vs_file.close();
-        // std::cout << "Process 0 successfully wrote file: " << vs_filename << std::endl;
-
     }
 }
+
+
 
 bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::string& outputFilename) {
     std::ifstream inputFile(inputFilename);

@@ -2,7 +2,7 @@
 #define KEPLER_TO_CARTESIAN_H
 
 #include "io.h"
-#include "body.h"
+
 
 // Structure representing orbital elements of a celestial body
 struct OrbitalElements {
@@ -16,8 +16,18 @@ struct OrbitalElements {
     double epoch;
 };
 
+// structure representing a  body (using state vectors)
+struct Body {
+    int index;             // unique index of body 
+    double mass;        // mass of the body
+    double x, y, z;     // position coordinates
+    double vx, vy, vz;  // velocity components
+    double ax, ay, az;  // acceleration components
+    std::string name;   // name of the body
+};
+
 // Read 
 // Convert orbital elements to Cartesian state vectors
 Body* convertKeplerToCartesian(const OrbitalElements& elem);
 
-#endif // KEPLER_TO_CARTESIAN_H
+#endif 

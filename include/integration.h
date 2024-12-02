@@ -1,11 +1,20 @@
 #ifndef INTEGRATION_H
 #define INTEGRATION_H
 
-#include "body.h"
 #include <vector>
-#include <omp.h>
+#include "body.h"
 
-// Perform leapfrog integration on the list of bodies
-void leapfrogIntegration(std::vector<Body>& bodies, double dt);
+/**
+ * @brief Performs leapfrog integration on the local bodies.
+ *
+ * @param positions     Vector of positions.
+ * @param velocities    Vector of velocities.
+ * @param accelerations Vector of accelerations.
+ * @param dt            Time step.
+ */
+void leapfrogIntegration(std::vector<Position>& positions,
+                         std::vector<Velocity>& velocities,
+                         const std::vector<Acceleration>& accelerations,
+                         double dt);
 
-#endif 
+#endif // INTEGRATION_H
