@@ -3,6 +3,7 @@
 
 #include "body.h"
 #include "octree.h"
+#include <omp.h>
 
 // Build the octree from the list of bodies
 void buildOctree(const std::vector<Body>& bodies, OctreeNode*& root);

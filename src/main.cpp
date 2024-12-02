@@ -2,20 +2,16 @@
 #include <vector>
 #include <string>
 #include <mpi.h>
+#include <omp.h>
 #include <filesystem>
 #include "body.h"
 #include "io.h"
 #include "barnes_hut.h"
 #include "integration.h"
-#include "logger.h"
 #include "cxxopts.hpp"
+#include "logger.h"
 
 
-// logging macro to output messages from a specific rank
-#define LOG(rank_to_print, msg) \
-    do { if (logging_enabled && rank == rank_to_print) std::cout << msg << std::endl; } while (0)
-
-bool logging_enabled = false; 
 namespace fs = std::filesystem;
 
 // parses time strings like "1h", "2.5d", "1y" into days
@@ -59,7 +55,18 @@ void createMPIBodyType(MPI_Datatype* MPI_BODY) {
 
 
 int main(int argc, char* argv[]) {
-    MPI_Init(&argc, &argv); // initialize MPI environment
+    int provided;
+
+    // Initialize MPI with thread support
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+
+    // Check the level of thread support provided
+    if (provided < MPI_THREAD_MULTIPLE) {
+        std::cerr << "MPI does not provide the required threading level" << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+
+    auto total_start = MPI_Wtime(); // start timing the total process
 
     MPI_Datatype MPI_BODY;
     createMPIBodyType(&MPI_BODY); // create MPI datatype for Body structure
@@ -67,6 +74,8 @@ int main(int argc, char* argv[]) {
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank); // get current process rank
     MPI_Comm_size(MPI_COMM_WORLD, &size); // get total number of processes
+
+
 
     // default simulation parameters
     const double G = 1.48812e-34; // gravitational constant in AU^3 kg^-1 day^-2
@@ -100,9 +109,7 @@ int main(int argc, char* argv[]) {
             return 0;
         }
 
-        // initialize logging
         logging_enabled = result.count("log");
-        Logger::initialize(logging_enabled);
 
         // get input filename
         if (result.count("file")) {
@@ -130,6 +137,15 @@ int main(int argc, char* argv[]) {
         if (rank == 0) std::cerr << "Error: " << e.what() << std::endl;
         MPI_Finalize();
         return 1;
+    }
+
+    LOG(0, "Maximum threads available: " << omp_get_max_threads());
+    #pragma omp parallel
+    {
+        #pragma omp single
+        {
+            LOG(rank, "Total threads: " << omp_get_num_threads() );
+        }
     }
 
     // log simulation parameters
@@ -183,6 +199,8 @@ int main(int argc, char* argv[]) {
                  local_bodies.data(), local_n, MPI_BODY, 0, MPI_COMM_WORLD);
     LOG(rank, "Process " << rank << " received " << local_n << " bodies " << "at index " << displs[rank]);
 
+    // All initialization is done, now start simulation timing
+    auto simulation_start = MPI_Wtime(); 
     // initialize simulation time and counters
     double t = 0.0;      // current simulation time in days
     int step = 0;        // simulation step counter
@@ -193,7 +211,7 @@ int main(int argc, char* argv[]) {
 
     // main simulation loop
     while (t < t_end) {
-        // perform leapfrog integration: update velocities by half step and positions by full step
+        // perform leapfrog integration, update velocities by half step and positions by full step
         leapfrogIntegration(local_bodies, dt);
 
         // advance simulation time
@@ -208,10 +226,14 @@ int main(int argc, char* argv[]) {
         computeAccelerations(bodies, local_bodies, G, theta, softening);
 
         // update velocities by another half step using new accelerations
-        for (auto& body : local_bodies) {
-            body.vx += body.ax * dt * 0.5; // update velocity components
-            body.vy += body.ay * dt * 0.5;
-            body.vz += body.az * dt * 0.5;
+
+
+        #pragma omp parallel for
+        for (size_t i = 0; i < local_bodies.size(); ++i) {
+            local_bodies[i].vx += local_bodies[i].ax * dt * 0.5; // update velocity components
+            local_bodies[i].vy += local_bodies[i].ay * dt * 0.5;
+            local_bodies[i].vz += local_bodies[i].az * dt * 0.5;
+            // LOG(rank, "Total threads: " << omp_get_num_threads());
         }
 
         // output visualization data at specified intervals
@@ -221,8 +243,14 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    auto simulation_end = MPI_Wtime();
     LOG(0, "Simulation completed.");
 
+    // output timing info
+    if (rank == 0) {
+        std::cout << "SIMULATION_TIME " << (simulation_end - simulation_start) << std::endl;
+        std::cout << "TOTAL_TIME " << (MPI_Wtime() - total_start) << std::endl;
+    }
 
     // clean up MPI data types and finalize MPI
     MPI_Type_free(&MPI_BODY);

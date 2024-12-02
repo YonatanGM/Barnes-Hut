@@ -43,7 +43,8 @@ void buildOctree(const std::vector<Body>& bodies, OctreeNode*& root) {
 void computeAccelerations(std::vector<Body>& bodies, std::vector<Body>& local_bodies, double G, double theta, double softening) {
     OctreeNode* root = nullptr;
     buildOctree(bodies, root);
-
+    
+    #pragma omp parallel for    
     for (auto& body : local_bodies) {
         body.ax = body.ay = body.az = 0.0;
         computeForcesBarnesHut(body, root, theta, G, softening, bodies);
