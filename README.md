@@ -34,11 +34,8 @@ Send a batch job for scenario2 with 4 nodes.
 sbatch jobscript.sh 
 ```
 
-the output csv files are stored in
-
-```bash
-build/sim
-```
+the output csv files are stored in `build/sim` folder
+The simulation outputs CSV files containing body positions, velocities, and other properties at each visualization step. These files can be loaded into ParaView for visualization. Writing in .vtp format is planned for future update. 
 
 Benchmarking script
 
@@ -47,5 +44,3 @@ sh benchmark_srun.sh
 ```
 
 Tests
-
-The simulation outputs CSV files containing body positions, velocities, and other properties at each visualization step. These files can be loaded into ParaView for visualization. Writing in .vtp format is planned for future update. 
