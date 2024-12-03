@@ -34,7 +34,13 @@ Send a batch job for scenario2 with 4 nodes.
 sbatch jobscript.sh 
 ```
 
-the output csv files are stored in `build/sim` folder
+Running Scenario2 locally from `build` folder.
+
+```bash
+./simulate --file ../data/scenario2.csv --dt 1h --t_end 1y --vs 7d --vs_dir sim_s2 --theta 1.05
+```
+
+the output csv files are stored in `build/sim_s2` folder
 The simulation outputs CSV files containing body positions, velocities, and other properties at each visualization step. These files can be loaded into ParaView for visualization. Writing in .vtp format is planned for future update. 
 
 Benchmarking script
