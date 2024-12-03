@@ -9,9 +9,9 @@
 #SBATCH --exclusive                 # Exclusive access to nodes
 
 # Load necessary modules
-module load gcc/10.2.0
+# module load gcc/10.2.0
 module load openmpi/3.1.6-gcc-10.2
-module load gnuplot
+# module load gnuplot
 
 # Define the output CSV file and gnuplot file
 output_file="benchmark_results.csv"
@@ -51,7 +51,7 @@ for N in "${mpi_nodes[@]}"; do
     echo "Running with MPI Nodes: $N, OpenMP Threads: $OMP"
 
     # Execute the simulation using srun and capture output
-    log_output=$(srun -N $N --ntasks=$N $simulate_binary \
+    log_output=$(srun -N $N $simulate_binary \
       --file $file --dt $dt --t_end $t_end --vs $vs \
       --vs_dir $vs_dir --theta $theta --log 2>&1)
 
