@@ -1,7 +1,7 @@
 #include <iostream>
-#include "io.h"
 #include "kepler_to_cartesian.h"
 
+// g++ -std=c++11 -o orbital_converter src/orbital_converter.cpp src/kepler_to_cartesian.cpp -I./include
 int main() {
     const std::string inputFilename = "data/scenario1_without_planets_and_moons.csv"; // Input file with orbital elements
     const std::string outputFilename = "state_vectors.csv";   // Output file for state vectors
