@@ -50,3 +50,4 @@ sh benchmark_srun.sh
 ```
 
 Tests
+Use of google benchmarking.
