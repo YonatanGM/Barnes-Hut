@@ -18,10 +18,4 @@ void saveState(const std::string& vs_dir, int vs_counter,
                const std::vector<Velocity>& velocities);
 
 
-// Function to convert orbital elements CSV to state vector CSV
-bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::string& outputFilename);
-
-// Function to combine two CSV files into one, removing duplicates based on the "name" column
-void combineCSVFiles(const std::string& inputFile1, const std::string& inputFile2, const std::string& outputFile);
-
 #endif 

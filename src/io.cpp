@@ -7,7 +7,6 @@
 #include <iomanip> 
 
 
-
 /**
  * @brief Reads bodies data from a CSV file.
  *
