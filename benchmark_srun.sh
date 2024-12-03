@@ -30,7 +30,7 @@ cd ./build
 
 file=${1:-"../data/scenario1.csv"}
 dt=${2:-"1h"}
-t_end=${3:-"1d"}
+t_end=${3:-"1y"}
 vs=${4:-"1d"}
 vs_dir=${5:-"sim0"}
 theta=${6:-"1.05"}
