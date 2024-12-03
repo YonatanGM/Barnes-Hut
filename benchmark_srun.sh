@@ -25,15 +25,18 @@ mpi_nodes=(1 2 3 4)                # Number of MPI nodes
 omp_threads=(8 16 24 32 48)        # Number of OpenMP threads per MPI node
 
 # Simulation parameters (modify as needed)
-file="./data/scenario1.csv"
-dt="1h"
-t_end="1d"
-vs="1d"
-vs_dir="sim0"
-theta="1.05"
+
+cd ./build
+
+file=${1:-"../data/scenario1.csv"}
+dt=${2:-"1h"}
+t_end=${3:-"1d"}
+vs=${4:-"1d"}
+vs_dir=${5:-"sim0"}
+theta=${6:-"1.05"}
 
 # Path to the simulation binary (update this path accordingly)
-simulate_binary="./build/simulate"
+simulate_binary="./simulate"
 
 # Iterate over each MPI node count and OpenMP thread count
 for N in "${mpi_nodes[@]}"; do
@@ -74,18 +77,24 @@ echo "Generating performance plot..."
 gnuplot <<EOF
 set terminal png size 1000,800
 set output "$plot_file"
-set title "Performance Metrics: MPI Nodes and OpenMP Threads"
-set xlabel "Configuration (MPI Nodes x OMP Threads)"
-set ylabel "Time (s)"
-set style data histograms
-set style histogram cluster gap 1
-set style fill solid
-set boxwidth 0.8
-set key autotitle columnheader
-set xtics rotate by -45
+set title "Benchmark Results: OpenMP Threads vs Time (Colored by MPI Processes)"
+set xlabel "OpenMP Threads"
+set ylabel "Simulation Time (s)"
+set style data linespoints
+set key outside
 set datafile separator ","
-plot "$output_file" using 3:xtic(1) title "Simulation Time", \
-     '' using 4 title "Total Time"
+
+# Define custom line styles with unique colors
+set style line 1 lc rgb '#FF0000' lt 1 lw 2 pt 7  # Red for MPI = 1
+set style line 2 lc rgb '#00FF00' lt 1 lw 2 pt 7  # Green for MPI = 2
+set style line 3 lc rgb '#0000FF' lt 1 lw 2 pt 7  # Blue for MPI = 3
+set style line 4 lc rgb '#FF00FF' lt 1 lw 2 pt 7  # Magenta for MPI = 4
+
+# Plot OpenMP Threads vs Time with different lines for each MPI process count
+plot "$output_file" using (\$1==1 ? \$2 : 1/0):(\$1==1 ? \$3 : 1/0) title "MPI = 1" with linespoints ls 1, \
+     "$output_file" using (\$1==2 ? \$2 : 1/0):(\$1==2 ? \$3 : 1/0) title "MPI = 2" with linespoints ls 2, \
+     "$output_file" using (\$1==3 ? \$2 : 1/0):(\$1==3 ? \$3 : 1/0) title "MPI = 3" with linespoints ls 3, \
+     "$output_file" using (\$1==4 ? \$2 : 1/0):(\$1==4 ? \$3 : 1/0) title "MPI = 4" with linespoints ls 4
 EOF
 
 echo "Performance plot generated: $plot_file"

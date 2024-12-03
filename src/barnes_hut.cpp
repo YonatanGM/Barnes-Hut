@@ -31,7 +31,7 @@ void computeAccelerations(const std::vector<double>& masses,
                           std::vector<Acceleration>& local_accelerations,
                           double G, double theta, double softening) {
     OctreeNode* root = nullptr;
-    buildOctreeParallel(masses, positions, root);
+    buildOctree(masses, positions, root);
     // Print the total number of tasks created and maximum depth
     // std::cout << "Total tasks created: " << totalTasksCreated.load() << std::endl;
     // std::cout << "Maximum depth reached: " << maxDepthReached.load() << std::endl;
