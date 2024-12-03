@@ -168,7 +168,7 @@ TEST_F(OctreeTest, DeepInsertion) {
         {19.0, 19.0, 19.0}
     };
 
-    for (int i = 0; i < masses.size(); ++i) {
+    for (int i = 0; i < static_cast<int>(masses.size()); ++i) {
         node.insertBody(i, masses, positions);
     }
 

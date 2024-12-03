@@ -5,6 +5,7 @@
 #include <omp.h>
 #include <atomic>
 #include <iostream>
+#include <algorithm>
 
 std::atomic<int> totalTasksCreated(0);
 std::atomic<int> maxDepthReached(0);

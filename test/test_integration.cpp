@@ -2,6 +2,7 @@
 #include <vector>
 #include "body.h"
 
+
 void leapfrogIntegration(std::vector<Position>& positions,
                          std::vector<Velocity>& velocities,
                          const std::vector<Acceleration>& accelerations,
@@ -32,8 +33,13 @@ TEST(LeapfrogIntegrationTest, NegativeAcceleration) {
 
     leapfrogIntegration(positions, velocities, accelerations, dt);
 
-    EXPECT_DOUBLE_EQ(positions[0].x, 0.25);
+    EXPECT_DOUBLE_EQ(positions[0].x, 0.5);
+    EXPECT_DOUBLE_EQ(positions[0].y, 0.0);
+    EXPECT_DOUBLE_EQ(positions[0].z, 0.0);
+
     EXPECT_DOUBLE_EQ(velocities[0].vx, 0.5);
+    EXPECT_DOUBLE_EQ(velocities[0].vy, 0.0);
+    EXPECT_DOUBLE_EQ(velocities[0].vz, 0.0);
 }
 
 TEST(LeapfrogIntegrationTest, MultipleBodies) {
@@ -45,10 +51,18 @@ TEST(LeapfrogIntegrationTest, MultipleBodies) {
     leapfrogIntegration(positions, velocities, accelerations, dt);
 
     EXPECT_DOUBLE_EQ(positions[0].x, 1.0);
-    EXPECT_DOUBLE_EQ(positions[0].y, 1.0);
+    EXPECT_DOUBLE_EQ(positions[0].y, 0.5);
     EXPECT_DOUBLE_EQ(positions[0].z, 0.0);
+
+    EXPECT_DOUBLE_EQ(positions[1].x, 1.5);
+    EXPECT_DOUBLE_EQ(positions[1].y, 2.0);
+    EXPECT_DOUBLE_EQ(positions[1].z, 1.0);
 
     EXPECT_DOUBLE_EQ(velocities[0].vx, 1.0);
     EXPECT_DOUBLE_EQ(velocities[0].vy, 0.5);
-}
+    EXPECT_DOUBLE_EQ(velocities[0].vz, 0.0);
 
+    EXPECT_DOUBLE_EQ(velocities[1].vx, 0.5);
+    EXPECT_DOUBLE_EQ(velocities[1].vy, 1.0);
+    EXPECT_DOUBLE_EQ(velocities[1].vz, 0.0);
+}

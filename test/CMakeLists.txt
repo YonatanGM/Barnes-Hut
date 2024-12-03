@@ -1,3 +1,5 @@
+project(ParallelNBodySimulationTests LANGUAGES C CXX)
+
 cmake_minimum_required(VERSION 3.16.3)
 # Enable testing
 enable_testing()
@@ -40,20 +42,24 @@ target_link_libraries(test_barnes_hut PRIVATE solar_system_lib gtest gtest_main)
 add_test(NAME test_barnes_hut COMMAND test_barnes_hut)
 
 # Include CodeCoverage.cmake
-# include(${CMAKE_SOURCE_DIR}/CodeCoverage.cmake)
-# include(CodeCoverage.cmake)
-# # Append coverage compiler flags
-# APPEND_COVERAGE_COMPILER_FLAGS()
+include(CodeCoverage.cmake)
+# Append coverage compiler flags
+APPEND_COVERAGE_COMPILER_FLAGS()
 
-# setup_target_for_coverage_lcov(
-#     NAME coverage                # Name of the coverage target
-#     EXECUTABLE ctest -j 4 # Runs tests using ctest
-#     DEPENDENCIES                 # Dependencies (all your test targets)
-#         test_main
-#         test_io
-#         test_integration
-#         test_octree
-#         test_barnes_hut
-#     # Optional: Add EXCLUDE arguments if needed
-#     # EXCLUDE "${PROJECT_SOURCE_DIR}/src/dir1/*" "/path/to/my/src/dir2/*"
-# )
+setup_target_for_coverage_lcov(
+    NAME coverage               
+    EXECUTABLE ctest --output-on-failure || true 
+    DEPENDENCIES                 
+        test_main
+        test_io
+        test_integration
+        test_octree
+        test_barnes_hut
+  
+    EXCLUDE 
+      "${CMAKE_SOURCE_DIR}/build/*"  # Exclude build directory
+      "${CMAKE_SOURCE_DIR}/build/_deps/*"  # Exclude _deps directory
+      "/usr/*"                        # Exclude system headers
+      "${CMAKE_SOURCE_DIR}/test/*"    
+      "${CMAKE_SOURCE_DIR}/include/*"  # exclude include directory
+)

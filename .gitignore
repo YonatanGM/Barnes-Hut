@@ -7,7 +7,7 @@ build/
 debug/
 release/
 *.cmake
-
+!CodeCoverage.cmake
 # Prerequisites
 *.d
 

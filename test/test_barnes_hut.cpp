@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <vector>
+#include <cmath>
 #include "barnes_hut.h"
 #include "body.h"
 
