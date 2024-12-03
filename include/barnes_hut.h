@@ -32,7 +32,43 @@ void computeForceBarnesHut(double mass, const Position& position, Acceleration& 
 void buildOctree(const std::vector<double>& masses, const std::vector<Position>& positions, OctreeNode*& root);
 
 
-#endif 
+/**
+ * @brief Builds the octree using parallelism.
+ *
+ * Constructs the Barnes-Hut octree by recursively dividing the space
+ * and inserting bodies into the tree. Parallelism is achieved using
+ * OpenMP tasks, and task creation is controlled based on the current
+ * depth to balance overhead and performance.
+ *
+ * @param masses Vector of masses of the bodies.
+ * @param positions Vector of positions of the bodies.
+ * @param root Reference to the pointer of the root node (will be created).
+ */
+void buildOctreeParallel(const std::vector<double>& masses,
+                 const std::vector<Position>& positions,
+                 OctreeNode*& root);
+
+/**
+ * @brief Recursively builds the octree nodes.
+ *
+ * Divides the bodies among child nodes and recursively builds the octree.
+ * Uses OpenMP tasks to parallelize the construction up to a certain depth.
+ *
+ * @param node Pointer to the current octree node.
+ * @param masses Vector of masses of the bodies.
+ * @param positions Vector of positions of the bodies.
+ * @param bodyIndices Indices of the bodies to be inserted into this node.
+ * @param currentDepth Current depth in the octree.
+ * @param MAX_DEPTH_FOR_TASKS Maximum depth to create tasks.
+ */
+void buildOctreeNode(OctreeNode* node,
+                     const std::vector<double>& masses,
+                     const std::vector<Position>& positions,
+                     const std::vector<int>& bodyIndices,
+                     int currentDepth, 
+                     int MAX_DEPTH_FOR_TASKS);
+
+#endif // BARNES_HUT_H
 
 
 

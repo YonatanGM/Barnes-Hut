@@ -52,8 +52,7 @@ public:
      */
     void clear();
 
-private:
-    /**
+        /**
      * @brief Determines the octant for a body relative to this node.
      *
      * @param position Position of the body
@@ -67,6 +66,8 @@ private:
      * @param index Octant index (0-7)
      */
     void createChild(int index);
+
+
 };
 
 #endif // OCTREE_H
