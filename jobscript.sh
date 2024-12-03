@@ -20,4 +20,4 @@ cd ./build
 
 # Run the simulation 
 # scenario2.
-srun --exclusive -N 4 ./simulate --file scenario2.csv --dt 1h --t_end 1y --vs 7d --vs_dir sim_s2 --theta 1.05
+srun --exclusive -N 4 ./simulate --file ../data/scenario2.csv --dt 1h --t_end 1y --vs 7d --vs_dir sim_s2 --theta 1.05
