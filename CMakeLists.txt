@@ -35,8 +35,8 @@ target_compile_definitions(${LIBRARY_NAME} PUBLIC _USE_MATH_DEFINES)
 
 # Check for optional and necessary dependencies
 if(APPLE)
-    set(CMAKE_C_COMPILER "/usr/local/bin/gcc")
-    set(CMAKE_CXX_COMPILER "/usr/local/bin/g++")
+    # set(CMAKE_C_COMPILER "/usr/local/bin/gcc")
+    # set(CMAKE_CXX_COMPILER "/usr/local/bin/g++")
 
     # OpenMP configuration
     set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/Cellar/libomp/19.1.4/include")
