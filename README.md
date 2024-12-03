@@ -1,4 +1,4 @@
-# n-body-simulation-bha
+# ParallelNBodySimulation
 
 This project simulates the gravitational interactions of bodies in a solar system. To build the project, use CMake. First, create a `build` directory, navigate into it, and run the following commands:
 
@@ -7,6 +7,12 @@ mkdir build
 cd build
 cmake ..
 make
+```
+
+or alternatively
+
+```bash
+sh rebuild.sh
 ```
 
 This will generate an executable named `simulate`. Run the simulation with:
@@ -21,5 +27,25 @@ This will generate an executable named `simulate`. Run the simulation with:
 - `--vs`: Visualization interval (e.g., `1d` for 1 day).
 - `--vs_dir`: Output directory for visualization files.
 - `--theta`: Barnes-Hut threshold parameter.
+
+Send a batch job for scenario2 with 4 nodes.
+
+```bash
+sbatch jobscript.sh 
+```
+
+the output csv files are stored in
+
+```bash
+build/sim
+```
+
+Benchmarking script
+
+```bash
+sh benchmark_srun.sh
+```
+
+Tests
 
 The simulation outputs CSV files containing body positions, velocities, and other properties at each visualization step. These files can be loaded into ParaView for visualization. Writing in .vtp format is planned for future update. 
