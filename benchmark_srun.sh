@@ -1,101 +1,89 @@
 #!/bin/bash
-#SBATCH --partition=all             # Use the "all" partition
-#SBATCH --nodelist=simcl1n[1-4]     # Node list: simcl1n1, simcl1n2, simcl1n3, simcl1n4
-#SBATCH --job-name="nbody_sim"      # Job name
-#SBATCH --output=job_output.out     # Standard output
-#SBATCH --error=job_error.err       # Standard error
-#SBATCH --time=02:00:00             # Maximum run time (2 hours)
-#SBATCH --nodes=4                   # Total number of nodes to allocate (adjust as needed)
-#SBATCH --exclusive                 # Exclusive access to nodes
+#SBATCH --partition=all             # use the "all" partition
+#SBATCH --nodelist=simcl1n[1-4]     # node list: simcl1n1, simcl1n2, simcl1n3, simcl1n4
+#SBATCH --job-name="nbody_sim"      # job name
+#SBATCH --output=job_output.out     # standard output
+#SBATCH --error=job_error.err       # standard error
+#SBATCH --time=02:00:00             # maximum run time (2 hours)
+#SBATCH --nodes=4                   # total number of nodes to allocate (adjust as needed)
+#SBATCH --exclusive                 # exclusive access to nodes
 
-# Load necessary modules
-# module load gcc/10.2.0
-module load openmpi/3.1.6-gcc-10.2
-# module load gnuplot
-
-# Define the output CSV file and gnuplot file
-output_file="benchmark_results.csv"
-plot_file="performance_plot.png"
-
-# Initialize the CSV file with headers
-echo "MPI_Nodes,OMP_Threads,SIMULATION_TIME(s),TOTAL_TIME(s)" > $output_file
-
-# Define the range of MPI nodes and OpenMP threads
-mpi_nodes=(1 2 3 4)                # Number of MPI nodes
-omp_threads=(8 16 24 32 48)        # Number of OpenMP threads per MPI node
-
-# Simulation parameters (modify as needed)
-
-cd ./build
-
+# Parameters for the simulation
 file=${1:-"../data/scenario1.csv"}
 dt=${2:-"1h"}
-t_end=${3:-"1y"}
+t_end=${3:-"1d"}
 vs=${4:-"1d"}
-vs_dir=${5:-"sim0"}
-theta=${6:-"1.05"}
+theta=${5:-"1.05"}
+vs_dir=${6:-"vs_${file//[^a-zA-Z0-9]/_}_${dt}_${t_end}_${vs}_${theta}"}
 
-# Path to the simulation binary (update this path accordingly)
+benchmark_data_file="benchmark/data_${file//[^a-zA-Z0-9]/_}_${dt}_${t_end}_${vs}_${theta}.dat"
+plot_file="benchmark/plot_${file//[^a-zA-Z0-9]/_}_${dt}_${t_end}_${vs}_${theta}.png"
+
+node_counts=(1 2 3 4)        # MPI node counts
+thread_counts=(2 8 16 32 48) # OpenMP thread counts
+
+# Move to the build directory and create the benchmark directory
+cd ./build
+mkdir -p benchmark "$vs_dir"
 simulate_binary="./simulate"
 
-# Iterate over each MPI node count and OpenMP thread count
-for N in "${mpi_nodes[@]}"; do
-  for OMP in "${omp_threads[@]}"; do
-    # Check if the number of OpenMP threads does not exceed physical cores per node
-    if (( OMP > 48 )); then
-      echo "Skipping configuration: MPI Nodes=$N, OMP Threads=$OMP (exceeds 48 cores per node)"
-      continue
-    fi
 
+> "$benchmark_data_file"
+
+
+echo "node thread total_time" >> "$benchmark_data_file"
+
+
+echo "Benchmark data file: $benchmark_data_file"
+echo "Visualization plot file: $plot_file"
+
+# Loop through MPI nodes and OpenMP threads, run simulations, and record data
+for node in "${node_counts[@]}"; do
+  for thread in "${thread_counts[@]}"; do
     # Set the number of OpenMP threads
-    export OMP_NUM_THREADS=$OMP
+    export OMP_NUM_THREADS=$thread
 
-    # Log the current configuration
-    echo "Running with MPI Nodes: $N, OpenMP Threads: $OMP"
+    echo "Running with MPI nodes: $node, OpenMP threads: $thread"
 
-    # Execute the simulation using srun and capture output
-    log_output=$(srun -N $N $simulate_binary \
+    # Run the simulation and capture output
+    total_time=$(srun --exclusive -N $node $simulate_binary \
       --file $file --dt $dt --t_end $t_end --vs $vs \
-      --vs_dir $vs_dir --theta $theta --log 2>&1)
+      --vs_dir $vs_dir --theta $theta --log 2>&1 | \
+      grep "TOTAL_TIME" | awk '{print $2}')
 
-    # Extract simulation and total time from the log output
-    simulation_time=$(echo "$log_output" | grep "SIMULATION_TIME" | awk '{print $2}')
-    total_time=$(echo "$log_output" | grep "TOTAL_TIME" | awk '{print $2}')
+    # Handle cases where TOTAL_TIME isn't found
+    total_time=${total_time:-na}
 
-    # Set to 'NA' if values are not found
-    simulation_time=${simulation_time:-NA}
-    total_time=${total_time:-NA}
-
-    # Append the results to the CSV file
-    echo "$N,$OMP,$simulation_time,$total_time" >> $output_file
+    # Append the results to the data file
+    echo "$node $thread $total_time" >> "$benchmark_data_file"
   done
+
+  # Add two blank lines after each node group for GNUplot index support
+  echo -e "\n" >> "$benchmark_data_file"
 done
 
-# Generate a single performance plot using gnuplot
-echo "Generating performance plot..."
+# Check if there are valid data points before plotting
+grep -q "^[0-9]" "$benchmark_data_file" || { echo "No valid data points to plot."; exit 1; }
 
+# Generate the plot 
 gnuplot <<EOF
 set terminal png size 1000,800
 set output "$plot_file"
-set title "Benchmark Results: OpenMP Threads vs Time (Colored by MPI Processes)"
-set xlabel "OpenMP Threads"
-set ylabel "Simulation Time (s)"
-set style data linespoints
+set title "Number of Nodes vs Number of OpenMP Threads vs Time"
+set xlabel "Thread Count"
+set ylabel "Total Time (s)"
 set key outside
-set datafile separator ","
+set style data linespoints
 
-# Define custom line styles with unique colors
-set style line 1 lc rgb '#FF0000' lt 1 lw 2 pt 7  # Red for MPI = 1
-set style line 2 lc rgb '#00FF00' lt 1 lw 2 pt 7  # Green for MPI = 2
-set style line 3 lc rgb '#0000FF' lt 1 lw 2 pt 7  # Blue for MPI = 3
-set style line 4 lc rgb '#FF00FF' lt 1 lw 2 pt 7  # Magenta for MPI = 4
+# Correct label syntax with escaped newlines
+set label "Simulation Parameters:\nFILE: $file\nDT: $dt\nT_END: $t_end\nVS: $vs\nTHETA: $theta" at graph 0.02, 0.98 left
 
-# Plot OpenMP Threads vs Time with different lines for each MPI process count
-plot "$output_file" using (\$1==1 ? \$2 : 1/0):(\$1==1 ? \$3 : 1/0) title "MPI = 1" with linespoints ls 1, \
-     "$output_file" using (\$1==2 ? \$2 : 1/0):(\$1==2 ? \$3 : 1/0) title "MPI = 2" with linespoints ls 2, \
-     "$output_file" using (\$1==3 ? \$2 : 1/0):(\$1==3 ? \$3 : 1/0) title "MPI = 3" with linespoints ls 3, \
-     "$output_file" using (\$1==4 ? \$2 : 1/0):(\$1==4 ? \$3 : 1/0) title "MPI = 4" with linespoints ls 4
+# Plot data for each node block using the index with automatically generated labels
+plot for [i=0:*] "$benchmark_data_file" index i using 2:3 title sprintf('Node %d', i+1) with lines lc i
 EOF
 
-echo "Performance plot generated: $plot_file"
-echo "Benchmarking complete. Results saved to $output_file."
+
+
+
+echo "Plot generated: $plot_file"
+
