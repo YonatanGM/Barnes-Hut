@@ -28,7 +28,7 @@ Scenario 1
 srun --exclusive -N 4 ./simulate --file ../data/scenario1.csv --dt 1h --t_end 12y --vs 2d --vs_dir sim_s1 --theta 1.05 --log
 ```  
 Around 25 minutes for ≈19000
-(1554 sec for 19054 bodies)
+(1488.58 sec for 19054 bodies)
 
 Use the `--log` to track the simulation. 
 
