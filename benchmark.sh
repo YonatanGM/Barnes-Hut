@@ -116,7 +116,7 @@ run_simulation() {
 fixed_nodes=4
 fixed_threads=32
 fixed_theta=1.05
-fixed_bodies=50000  # Adjust as needed
+fixed_bodies=300000  # Adjust as needed
 
 echo "Starting Phase 1: Runtime vs. Number of Bodies"
 for bodies in "${body_counts[@]}"; do
