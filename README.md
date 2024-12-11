@@ -101,9 +101,7 @@ These diagrams provide a combined view of how both MPI node count and OpenMP thr
 **Analysis:**  
 We can see that the generally the times are decreasing with more nodes and threads. 
 However, it's not exactly linear. For scenario 1, we get fastest time using 4 nodes and just 8 threads. 
-For scenario 2, different combination give best times like using all 4 nodes, 2 nodes with 32 threads or single node using all threads, etc. 
-
-Another observation is that as we increase the number of threads, the performance improvement from adding more nodes becomes less. 
+For scenario 2, different combination give best times like using all 4 nodes, 2 nodes with 32 threads or single node using all threads, etc. Another observation is that as we increase the number of threads, the performance improvement from adding more nodes becomes less. 
 
 ---
 
