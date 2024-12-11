@@ -168,7 +168,10 @@ void computeGlobalEnergiesParallel(const std::vector<double>& masses,
     size_t N = masses.size();
     int start_i = displs[rank];
     int end_i = start_i + local_n;
-
+    // unused var warning supression.
+    (void)size;
+    (void)sendcounts;
+    
     double local_kinetic = 0.0;
     double local_potential = 0.0;
 

@@ -7,7 +7,7 @@
 #include <iomanip>
 #include <cstring>
 #include <unordered_map>
-
+#include <filesystem>
 
 // Global stable map for orbit_class strings
 // assign incremental IDs as we encounter new classes
