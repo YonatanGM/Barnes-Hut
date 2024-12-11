@@ -28,7 +28,7 @@ Inside the simulation loop:
 - Global kinetic and potential energies are calculated by summing contributions from all ranks using `MPI_Allreduce`.  
 - Each rank writes VTP files for its assigned bodies, while the root rank manages updates to the PVD file that aggregates all outputs. 
 
-The acceleration calculations, position, and velocity updates are parallelized with OpenMP. We tried parallel octree construction on multiple threads but didn't see performance gains (performs similarly or slightly worse).
+The acceleration calculations, position, and velocity updates are parallelized with OpenMP. We tried parallel octree construction on multiple threads but didn't see performance gains (performs similarly or slightly worse). The implementatino is included in this project. 
 
 ---
 
