@@ -28,7 +28,7 @@ Inside the simulation loop:
 - Global kinetic and potential energies are calculated by summing contributions from all ranks using `MPI_Allreduce`.  
 - Each rank writes VTP files for its assigned bodies, while the root rank manages updates to the PVD file that aggregates all outputs. 
 
-The acceleration calculations, position, and velocity updates are parallelized with OpenMP. We tried parallel octree construction on multiple threads but didn't see performance gains (performs similarly or slightly worse). The implementatino is included in this project. 
+The acceleration calculations, position, and velocity updates are parallelized with OpenMP. We tried parallel octree construction on multiple threads but didn't see performance gains (performs similarly or slightly worse). The implementation is included in this project. 
 
 ---
 
@@ -78,7 +78,7 @@ This shows how runtime changes with more OpenMP threads, using 4 MPI nodes and 3
 ![Runtime vs. OpenMP Threads](benchmark/scenario2__dt_1h_tend_1d_vs_1d_theta_1.05/plot_threads.png)
 
 **Analysis:**  
-Runtime improves as more threads are added, especially up to about 32 threads. Beyond that, the gains slow down, likely due to hardware limitations (e.g., core count) and the overhead of managing additional threads.
+Runtime improves as more threads are added, especially up to about 32 threads. Beyond that, the gains slow down, likely due to hardware limitations (like core count) and the overhead of managing additional threads.
 
 ---
 
