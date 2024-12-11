@@ -50,7 +50,7 @@ We managed to simulate up to 300,000 bodies in under 30 minutes (1889 seconds fo
 
 ---
 
-## Performance Plots
+## Benchmarks
 
 ### Diagram 1: Runtime vs. Number of Bodies
 This shows how runtime changes as the number of bodies increases, with 4 MPI nodes and 32 OpenMP threads.
