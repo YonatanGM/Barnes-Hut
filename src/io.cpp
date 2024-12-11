@@ -350,6 +350,8 @@ void updatePVDFile(const std::string &pvdFilename,
     XMLElement* vtkFile = nullptr;
     XMLElement* collection = nullptr;
 
+    std::string fullPVDPath = vs_dir + "/" + pvdFilename;
+
     if (vs_counter == 0) {
         // create a new .pvd file or overwrite existing one
         vtkFile = doc.NewElement("VTKFile");
@@ -424,7 +426,7 @@ void updatePVDFile(const std::string &pvdFilename,
 
         // construct the file reference path
         std::ostringstream fileRef;
-        fileRef << vs_dir << "/" << r << "/sim." << vs_counter << ".vtp";
+        fileRef << r << "/sim." << vs_counter << ".vtp";  // Relative path within the directory
         dataSet->SetAttribute("file", fileRef.str().c_str());
 
         // append the DataSet to the Collection
@@ -432,8 +434,8 @@ void updatePVDFile(const std::string &pvdFilename,
     }
 
     // save the pvd
-    XMLError saveResult = doc.SaveFile(pvdFilename.c_str());
+    XMLError saveResult = doc.SaveFile(fullPVDPath.c_str());
     if (saveResult != XML_SUCCESS) {
-        std::cerr << "Error saving .pvd file: " << pvdFilename << std::endl;
+        std::cerr << "Error saving .pvd file: " << fullPVDPath << std::endl;
     }
 }

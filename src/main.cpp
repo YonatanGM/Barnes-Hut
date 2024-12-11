@@ -134,8 +134,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // log the maximum number of threads available
-    LOG(rank, "maximum threads available: " << omp_get_max_threads());
+    // log the number of threads available
+    LOG(rank, "threads available: " << omp_get_max_threads());
 
     // log simulation parameters
     if (rank == 0) {
@@ -353,7 +353,7 @@ int main(int argc, char* argv[]) {
     auto simulation_end = MPI_Wtime(); // end simulation timing
     LOG(0, "simulation completed.");
 
-    // output timing information
+    // output timing information and summed up distances
     if (rank == 0) {
         double dx = 0.0, dy = 0.0, dz = 0.0;
         for (int i = 0; i < num_bodies; ++i) {
