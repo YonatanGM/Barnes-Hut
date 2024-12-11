@@ -3,6 +3,7 @@
 #include <cmath>
 #include "barnes_hut.h"
 #include "body.h"
+#include <mpi.h>
 
 class BarnesHutTest : public ::testing::Test {
 protected:
@@ -148,3 +149,54 @@ TEST_F(BarnesHutTest, ComputeAccelerationsMultipleBodies) {
     EXPECT_NEAR(local_accelerations[0].az, expectedAcc.az, 1e-6);
 }
 
+// TEST_F(BarnesHutTest, ComputeGlobalEnergiesParallel) {
+
+//     std::vector<double> masses = {10.0, 20.0, 15.0};
+//     std::vector<Position> positions = {{0.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}};
+//     std::vector<Velocity> velocities = {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}};
+
+//     double kinetic_energy = 0.0;
+//     double potential_energy = 0.0;
+//     double total_energy = 0.0;
+//     double virial_equilibrium = 0.0;
+
+//     int rank = 0, size = 1;
+//     std::vector<int> displs = {0};
+//     std::vector<int> sendcounts = {3};
+//     int local_n = 3;
+//     MPI_Init(nullptr, nullptr); // Initialize MPI
+//     computeGlobalEnergiesParallel(masses, positions, velocities, G, rank, size, displs, sendcounts, local_n,
+//                                    kinetic_energy, potential_energy, total_energy, virial_equilibrium);
+
+//     double expected_kinetic_energy = 0.5 * (10.0 + 20.0 + 15.0);
+//     EXPECT_NEAR(kinetic_energy, expected_kinetic_energy, 1e-6);
+//     EXPECT_LE(potential_energy, 0.0); // Potential energy should be non-positive
+//     EXPECT_NEAR(total_energy, kinetic_energy + potential_energy, 1e-6);
+//     EXPECT_GT(virial_equilibrium, 0.0); // Virial ratio should be positive
+// }
+
+TEST_F(BarnesHutTest, BuildOctreeComplex) {
+    std::vector<double> masses = {10.0, 20.0, 15.0, 25.0};
+    std::vector<Position> positions = {
+        {-1.0, -1.0, -1.0},
+        {1.0, 1.0, 1.0},
+        {0.5, 0.5, 0.5},
+        {-0.5, -0.5, -0.5}
+    };
+
+    OctreeNode* root = nullptr;
+    buildOctree(masses, positions, root);
+
+    EXPECT_NE(root, nullptr);
+    EXPECT_DOUBLE_EQ(root->mass, 70.0);
+
+    double comX = (-10.0 + 20.0 * 1.0 + 15.0 * 0.5 - 25.0 * 0.5) / 70.0;
+    double comY = comX;
+    double comZ = comX;
+
+    EXPECT_DOUBLE_EQ(root->comX, comX);
+    EXPECT_DOUBLE_EQ(root->comY, comY);
+    EXPECT_DOUBLE_EQ(root->comZ, comZ);
+
+    delete root;
+}
