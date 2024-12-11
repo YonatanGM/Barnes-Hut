@@ -26,7 +26,7 @@ Inside the simulation loop:
 - A second half-step velocity update is performed to finalize the integration step.  
 - Accelerations are calculated for each body based on the updated global positions using the Barnes-Hut algorithm. 
 - Global kinetic and potential energies are calculated by summing contributions from all ranks using `MPI_Allreduce`.  
-- Each rank writes VTP files for its assigned bodies, while the root rank manages updates to the PVD file that aggregates all outputs. Synchronization across ranks is enforced using `MPI_Barrier`.
+- Each rank writes VTP files for its assigned bodies, while the root rank manages updates to the PVD file that aggregates all outputs. 
 
 The acceleration calculations, position, and velocity updates are parallelized with OpenMP. We tried parallel octree construction on multiple threads but didn't see performance gains (performs similarly or slightly worse).
 
@@ -44,7 +44,7 @@ The simulation took 25 minutes for ~19,000 bodies (1488.58 seconds for 19,054 bo
 **Note:** Use the `--log` option to monitor the simulation's progress. To limit the number of bodies, use the `--bodies` option. To get more information, use `--help`.
 ### Scenario 2
 ```bash
-srun --exclusive -N 4 ./simulate --file ../data/scenario2.csv --dt 1h --t_end 1y --vs 7d --vs_dir sim_s2 --theta 1.05
+srun --exclusive -N 4 ./simulate --file ../data/scenario2_306051.csv --dt 1h --t_end 1y --vs 7d --vs_dir sim_s2 --theta 1.05
 ```
 We managed to simulate up to 300,000 bodies in under 30 minutes (1889 seconds for 306,051 bodies).
 
@@ -68,7 +68,7 @@ This shows how runtime changes as we add more MPI nodes, keeping 32 OpenMP threa
 ![Runtime vs. MPI Nodes](benchmark/scenario2__dt_1h_tend_1d_vs_1d_theta_1.05/plot_nodes.png)
 
 **Analysis:**  
-As more MPI nodes are added, the runtime decreases because the workload is divided across more nodes. However, the speedup is not perfectly linear, likely due to communication or synchronization overhead as more nodes are added.
+As more MPI nodes are added, the runtime decreases because the workload is divided across more nodes. However, the speedup is not perfectly linear. We think this might be due to MPI communication or synchronization overhead as more nodes are used.
 
 ---
 
