@@ -88,7 +88,7 @@ This compares runtime and accuracy (distance sum difference) as θ changes for a
 ![Runtime and Distance Sum Difference vs. θ](benchmark/scenario2__dt_1h_tend_1d_vs_1d_theta_1.05/plot_theta.png)
 
 **Analysis:**  
-For each θ, the final positions of all bodies were summed component-wise at the last timestep and compared to the sum from the run with θ = 0.01 (the reference). Smaller θ values take longer because they use a stricter Barnes-Hut criterion, allowing fewer approximations. Larger θ values are faster due to more approximations. Interestingly, except for θ = 2.0, there was no difference in the summed positions—all other runs matched the reference exactly.
+For each θ, the final positions of all bodies were summed component-wise at the last timestep and compared to the sum from the run with θ = 0.01 (the reference). Smaller θ values (< 0.5) are significantly slower because they use a stricter Barnes-Hut criterion, allowing fewer approximations. Larger θ values are faster due to more approximations. Interestingly, except for θ = 2.0, there was no difference in the summed positions—all other runs matched the reference exactly.
 
 ---
 
