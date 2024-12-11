@@ -19,6 +19,7 @@ set(LIBRARY_SOURCES
     src/integration.cpp
     src/io.cpp
     src/kepler_to_cartesian.cpp
+    src/tinyxml2.cpp
 )
 
 set(LIBRARY_NAME solar_system_lib)

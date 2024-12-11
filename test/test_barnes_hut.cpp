@@ -33,7 +33,7 @@ TEST_F(BarnesHutTest, ComputeForceBarnesHutSingleBody) {
     Position position = {0.0, 0.0, 0.0};
     Acceleration acceleration = {0.0, 0.0, 0.0};
 
-    computeForceBarnesHut(mass, position, acceleration, root, G, theta, softening);
+    computeForceOnBody(mass, position, acceleration, root, G, theta, softening);
 
     // Compute expected acceleration directly
     double dx = positions[0].x - position.x;

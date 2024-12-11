@@ -3,27 +3,13 @@
 #include <limits>
 #include <vector>
 #include <omp.h>
+#include <mpi.h>
 #include <atomic>
 #include <iostream>
 #include <algorithm>
 
-std::atomic<int> totalTasksCreated(0);
-std::atomic<int> maxDepthReached(0);
 
-// using namespace std;/
-
-/**
- * @brief Computes accelerations for local bodies using the Barnes-Hut algorithm.
- *
- * @param masses           Vector of all masses.
- * @param positions        Vector of all positions.
- * @param local_masses     Vector of local masses.
- * @param local_positions  Vector of local positions.
- * @param local_accelerations Vector to store computed accelerations for local bodies.
- * @param G                Gravitational constant.
- * @param theta            Barnes-Hut opening angle parameter.
- * @param softening        Softening parameter to prevent singularities.
- */
+// Computes accelerations for local bodies using the Barnes-Hut algorithm.
 void computeAccelerations(const std::vector<double>& masses,
                           const std::vector<Position>& positions,
                           const std::vector<double>& local_masses,
@@ -41,7 +27,7 @@ void computeAccelerations(const std::vector<double>& masses,
         local_accelerations[i].ax = 0.0;
         local_accelerations[i].ay = 0.0;
         local_accelerations[i].az = 0.0;
-        computeForceBarnesHut(local_masses[i], local_positions[i], local_accelerations[i], root, G, theta, softening);
+        computeForceOnBody(local_masses[i], local_positions[i], local_accelerations[i], root, G, theta, softening);
     }
 
     delete root;
@@ -60,7 +46,7 @@ void computeAccelerations(const std::vector<double>& masses,
  * @param theta        Barnes-Hut opening angle parameter.
  * @param softening    Softening parameter to prevent singularities.
  */
-void computeForceBarnesHut(double mass, const Position& position, Acceleration& acceleration,
+void computeForceOnBody(double mass, const Position& position, Acceleration& acceleration,
                            OctreeNode* node, double G, double theta, double softening) {
     if (node == nullptr) {
         return;
@@ -98,7 +84,7 @@ void computeForceBarnesHut(double mass, const Position& position, Acceleration& 
             acceleration.az += force * dz;
         } else {
             for (int i = 0; i < 8; ++i) {
-                computeForceBarnesHut(mass, position, acceleration, node->children[i], G, theta, softening);
+                computeForceOnBody(mass, position, acceleration, node->children[i], G, theta, softening);
             }
         }
     }
@@ -146,9 +132,85 @@ void buildOctree(const std::vector<double>& masses, const std::vector<Position>&
     }
 }
 
+/**
+ * @brief Computes the global kinetic and potential energies of the N-body system.
+ *
+ * This function calculates the kinetic and potential energies by aggregating
+ * contributions from all MPI processes. It uses OpenMP for parallel computation
+ * within each process and MPI_Allreduce to sum the local energies globally.
+ *
+ * @param masses               Vector of masses for all bodies.
+ * @param positions            Vector of positions for all bodies.
+ * @param local_velocities     Vector of velocities for bodies assigned to this process.
+ * @param G                    Gravitational constant.
+ * @param rank                 MPI process rank.
+ * @param size                 Total number of MPI processes.
+ * @param displs               Displacements for each process's data segment.
+ * @param sendcounts           Number of elements each process handles.
+ * @param local_n              Number of bodies handled by this process.
+ * @param kinetic_energy       Reference to store the computed global kinetic energy.
+ * @param potential_energy     Reference to store the computed global potential energy.
+ * @param total_energy         Reference to store the sum of kinetic and potential energies.
+ * @param virial_equilibrium   Reference to store the virial equilibrium ratio.
+ */
+void computeGlobalEnergiesParallel(const std::vector<double>& masses,
+                                   const std::vector<Position>& positions,
+                                   const std::vector<Velocity>& local_velocities,
+                                   double G,
+                                   int rank, int size,
+                                   const std::vector<int>& displs,
+                                   const std::vector<int>& sendcounts,
+                                   int local_n,
+                                   double& kinetic_energy,
+                                   double& potential_energy,
+                                   double& total_energy,
+                                   double& virial_equilibrium) {
+    size_t N = masses.size();
+    int start_i = displs[rank];
+    int end_i = start_i + local_n;
+
+    double local_kinetic = 0.0;
+    double local_potential = 0.0;
+
+    // Compute local kinetic energy
+    #pragma omp parallel for reduction(+:local_kinetic)
+    for (int i = 0; i < local_n; i++) {
+        double v2 = local_velocities[i].vx * local_velocities[i].vx +
+                    local_velocities[i].vy * local_velocities[i].vy +
+                    local_velocities[i].vz * local_velocities[i].vz;
+        local_kinetic += 0.5 * masses[start_i + i] * v2;
+    }
+
+    // accumulate potential energy, ensuring each pair is counted only once
+    // If rank 0 handles bodies 0-1, it computes pairs: (0,1), (0,2), (0,3), (1,2), (1,3)
+    // If rank 2 handles bodies 2-3, it computes pair: (2,3)
+    #pragma omp parallel for reduction(+:local_potential) schedule(dynamic)
+    for (int i = start_i; i < end_i; i++) {
+        for (int j = i + 1; j < (int)N; j++) {
+            double dx = positions[j].x - positions[i].x;
+            double dy = positions[j].y - positions[i].y;
+            double dz = positions[j].z - positions[i].z;
+            double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist > 0.0) {
+                local_potential += -G * masses[i] * masses[j] / dist;
+            }
+        }
+    }
+
+    // Aggregate energies globally
+    double global_kinetic = 0.0, global_potential = 0.0;
+    MPI_Allreduce(&local_kinetic, &global_kinetic, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(&local_potential, &global_potential, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+    kinetic_energy = global_kinetic;
+    potential_energy = global_potential;
+    total_energy = kinetic_energy + potential_energy;
+    virial_equilibrium = (potential_energy != 0.0) ? -2.0 * (kinetic_energy / potential_energy) : 0.0;
+}
+
 
 /**
- * @brief Builds the octree using parallelism.
+ * @brief Builds the octree in parallel.
  *
  * Constructs the Barnes-Hut octree by recursively dividing the space
  * and inserting bodies into the tree. Parallelism is achieved using
@@ -329,7 +391,6 @@ void buildOctreeNode(OctreeNode* node,
 }
 
 
-// Explanation of MAX_DEPTH_FOR_TASKS calculation:
 //
 // We want to determine the maximum depth to create tasks so that we don't create more tasks than the
 // available number of threads, to avoid excessive overhead.

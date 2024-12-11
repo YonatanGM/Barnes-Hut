@@ -2,17 +2,7 @@
 #include <omp.h>
 
 
-/**
- * @brief Performs leapfrog integration on the given positions and velocities.
- *
- * This function updates velocities by a half step and positions by a full step using the leapfrog integration method.
- * It uses the provided accelerations and time step.
- *
- * @param positions Vector of positions to be updated.
- * @param velocities Vector of velocities to be updated.
- * @param accelerations Vector of accelerations.
- * @param dt Time step for the integration.
- */
+// Performs leapfrog integration on the local bodies.
 void leapfrogIntegration(std::vector<Position>& positions,
                          std::vector<Velocity>& velocities,
                          const std::vector<Acceleration>& accelerations,

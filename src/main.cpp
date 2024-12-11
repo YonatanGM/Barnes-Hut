@@ -4,17 +4,22 @@
 #include <mpi.h>
 #include <omp.h>
 #include <filesystem>
-#include <cstddef> // For offsetof
+#include <cstddef> // for offsetof
+#include <cmath>
+#include <sstream>
+#include <iomanip>
 #include "body.h"
 #include "io.h"
 #include "barnes_hut.h"
 #include "integration.h"
 #include "cxxopts.hpp"
 #include "logger.h"
+#include "tinyxml2.h"
 
 namespace fs = std::filesystem;
 
-// Parses time strings like "1h", "2.5d", "1y" into days
+
+// parses time strings like "1h", "2.5d", "1y" into days
 double parseTime(const std::string& timeStr) {
     double timeValue = std::stod(timeStr.substr(0, timeStr.size() - 1)); 
     char unit = timeStr.back(); // get the unit character
@@ -23,316 +28,348 @@ double parseTime(const std::string& timeStr) {
         case 'd': return timeValue;                // already in days
         case 'y': return timeValue * 365.25;       // convert years to days
         default:
-            throw std::invalid_argument("Unknown time unit: " + timeStr);
+            throw std::invalid_argument("unknown time unit: " + timeStr);
     }
 }
 
 
-/**
- * @brief Creates an MPI datatype for the Position structure.
- * @param MPI_POSITION Pointer to the MPI_Datatype to be created.
- */
-void createMPIPositionType(MPI_Datatype* MPI_POSITION) {
-    int lengths[3] = {1, 1, 1};
-    MPI_Aint displacements[3];
-    MPI_Datatype types[3] = {MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE};
-
-    displacements[0] = offsetof(Position, x);
-    displacements[1] = offsetof(Position, y);
-    displacements[2] = offsetof(Position, z);
-
-    MPI_Type_create_struct(3, lengths, displacements, types, MPI_POSITION);
-    MPI_Type_commit(MPI_POSITION);
-}
-
-
-/**
- * @brief Creates an MPI datatype for the Velocity structure.
- * @param MPI_VELOCITY Pointer to the MPI_Datatype to be created.
- */
-void createMPIVelocityType(MPI_Datatype* MPI_VELOCITY) {
-    int lengths[3] = {1, 1, 1};
-    MPI_Aint displacements[3];
-    MPI_Datatype types[3] = {MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE};
-
-    displacements[0] = offsetof(Velocity, vx);
-    displacements[1] = offsetof(Velocity, vy);
-    displacements[2] = offsetof(Velocity, vz);
-
-    MPI_Type_create_struct(3, lengths, displacements, types, MPI_VELOCITY);
-    MPI_Type_commit(MPI_VELOCITY);
-}
-
-
-/**
- * @brief Creates an MPI datatype for the Acceleration structure.
- * @param MPI_ACCELERATION Pointer to the MPI_Datatype to be created.
- */
-void createMPIAccelerationType(MPI_Datatype* MPI_ACCELERATION) {
-    int lengths[3] = {1, 1, 1};
-    MPI_Aint displacements[3];
-    MPI_Datatype types[3] = {MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE};
-
-    displacements[0] = offsetof(Acceleration, ax);
-    displacements[1] = offsetof(Acceleration, ay);
-    displacements[2] = offsetof(Acceleration, az);
-
-    MPI_Type_create_struct(3, lengths, displacements, types, MPI_ACCELERATION);
-    MPI_Type_commit(MPI_ACCELERATION);
-}
-
-
-/**
- * @brief Main function for the N-Body Simulation with MPI & Barnes-Hut algorithm.
- *
- * This function initializes MPI, parses command-line arguments, sets up the simulation parameters,
- * distributes data among processes, and runs the main simulation loop.
- */
 int main(int argc, char* argv[]) {
     int provided;
 
-    // Initialize MPI with thread support
+    // initialize mpi with thread support
     MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
 
-    // Check the level of thread support provided
+    // check the level of thread support provided
     if (provided < MPI_THREAD_FUNNELED) {
-        std::cerr << "MPI does not provide the required threading level" << std::endl;
+        std::cerr << "mpi does not provide the required threading level" << std::endl;
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-    auto total_start = MPI_Wtime(); // Start timing the total process
+    auto total_start = MPI_Wtime(); // start timing the total process
 
-    // Create custom MPI datatypes
-    MPI_Datatype MPI_POSITION, MPI_VELOCITY, MPI_ACCELERATION;
-    createMPIPositionType(&MPI_POSITION);
-    createMPIVelocityType(&MPI_VELOCITY);
-    createMPIAccelerationType(&MPI_ACCELERATION);
+    // custom mpi type for acceleration, position and velocities 
+    MPI_Datatype MPI_VECTOR;
+    MPI_Type_contiguous(3, MPI_DOUBLE, &MPI_VECTOR);
+    MPI_Type_commit(&MPI_VECTOR);
+
 
     int rank, size;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get current process rank
-    MPI_Comm_size(MPI_COMM_WORLD, &size); // Get total number of processes
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank); // get current process rank
+    MPI_Comm_size(MPI_COMM_WORLD, &size); // get total number of processes
 
-    // Default simulation parameters
-    const double G = 1.48812e-34; // Gravitational constant in AU^3 kg^-1 day^-2
-    double softening = 1e-11;     // Softening parameter in AU
-    double theta = 0.5;           // Barnes-Hut opening angle parameter
-    double dt = 1.0;              // Time step in days
-    double t_end = 365.25;        // End time in days (default 1 year)
-    double vs = 1.0;              // Visualization step in days
-    std::string vs_dir = "sim";   // Output directory for visualization data
-    std::string filename;         // Input filename
+    // default simulation parameters
+    const double G = 1.48812e-34; // gravitational constant in AU^3 kg^-1 day^-2
+    double softening = 1e-11;     // softening parameter in AU
+    double theta = 0.5;           // barnes-hut opening angle parameter
+    double dt_val = 1.0;          // time step in days
+    double t_end_val = 365.25;    // end time in days (default 1 year)
+    double vs_val = 1.0;          // visualization step in days
+    std::string vs_dir = "sim";   // output directory for visualization data
+    std::string filename;         // input filename
 
-    // Command-line argument parsing
+    std::string dt_str;
+    std::string t_end_str;
+    std::string vs_str;
+    int body_count = -1; // if not provided, use all bodies
+
     try {
-        // Set up command-line options using cxxopts
-        cxxopts::Options options(argv[0], "N-Body Simulation with MPI & Barnes-Hut");
+        // set up command-line options using cxxopts
+        cxxopts::Options options(argv[0], "n-body simulation with mpi & barnes-hut");
         options.add_options()
-            // Define command-line options
-            ("f,file", "Input file", cxxopts::value<std::string>())
-            ("d,dt", "Time step (e.g., 1d)", cxxopts::value<std::string>()->default_value("1d"))
-            ("t,t_end", "End time (e.g., 1y)", cxxopts::value<std::string>()->default_value("1y"))
-            ("v,vs", "Visualization step", cxxopts::value<std::string>()->default_value("1d"))
-            ("o,vs_dir", "Output directory", cxxopts::value<std::string>()->default_value("sim"))
-            ("theta", "Barnes-Hut parameter", cxxopts::value<double>()->default_value("0.5"))
-            ("s,softening", "Softening parameter", cxxopts::value<double>()->default_value("1e-11"))
-            ("log", "Enable logging")
-            ("h,help", "Show usage");
+            // define command-line options
+            ("f,file", "input file", cxxopts::value<std::string>())
+            ("d,dt", "time step (e.g., 1d)", cxxopts::value<std::string>()->default_value("1d"))
+            ("t,t_end", "end time (e.g., 1y)", cxxopts::value<std::string>()->default_value("1y"))
+            ("v,vs", "visualization step", cxxopts::value<std::string>()->default_value("1d"))
+            ("o,vs_dir", "output directory", cxxopts::value<std::string>()->default_value("sim"))
+            ("theta", "barnes-hut parameter", cxxopts::value<double>()->default_value("0.5"))
+            ("s,softening", "softening parameter", cxxopts::value<double>()->default_value("1e-11"))
+            ("b,bodies", "number of bodies to simulate", cxxopts::value<int>()->default_value("-1"))
+            ("log", "enable logging")
+            ("h,help", "show usage");
 
-        // Parse the command-line arguments
+        // parse the command-line arguments
         auto result = options.parse(argc, argv);
 
-        // If help is requested, display usage and exit
+        // if help is requested, display usage and exit
         if (result.count("help")) {
             if (rank == 0) std::cout << options.help() << std::endl;
             MPI_Finalize();
             return 0;
         }
 
-        // Check if logging is enabled
+        // check if logging is enabled
         logging_enabled = result.count("log");
 
-        // Get input filename
+        // get input filename
         if (result.count("file")) {
             filename = result["file"].as<std::string>();
         } else {
-            if (rank == 0) std::cerr << "Error: Input file not specified. Use --file <filename>" << std::endl;
+            if (rank == 0) std::cerr << "error: input file not specified. use --file <filename>" << std::endl;
             MPI_Finalize();
             return 1;
         }
 
-        // Parse other parameters
-        dt = parseTime(result["dt"].as<std::string>());
-        t_end = parseTime(result["t_end"].as<std::string>());
-        vs = parseTime(result["vs"].as<std::string>());
+        // parse other parameters
+        dt_str = result["dt"].as<std::string>();
+        t_end_str = result["t_end"].as<std::string>();
+        vs_str = result["vs"].as<std::string>();
         vs_dir = result["vs_dir"].as<std::string>();
         theta = result["theta"].as<double>();
         softening = result["softening"].as<double>();
+        body_count = result["bodies"].as<int>();
 
-        // Validate parameters
-        if (dt <= 0 || t_end <= 0 || vs <= 0 || theta <= 0 || softening < 0) {
-            throw std::invalid_argument("Invalid or missing parameters.");
+        dt_val = parseTime(dt_str);
+        t_end_val = parseTime(t_end_str);
+        vs_val = parseTime(vs_str);
+
+        // validate parameters
+        if (dt_val <= 0 || t_end_val <= 0 || vs_val <= 0 || theta <= 0 || softening < 0) {
+            throw std::invalid_argument("invalid or missing parameters.");
         }
     } catch (const std::exception& e) {
-        // Handle exceptions during argument parsing
-        if (rank == 0) std::cerr << "Error: " << e.what() << std::endl;
+        // handle exceptions during argument parsing
+        if (rank == 0) std::cerr << "error: " << e.what() << std::endl;
         MPI_Finalize();
         return 1;
     }
 
-    // Log the maximum number of threads available
-    LOG(rank, "Maximum threads available: " << omp_get_max_threads());
+    // log the maximum number of threads available
+    LOG(rank, "maximum threads available: " << omp_get_max_threads());
 
-    // Log the number of threads in use
-    #pragma omp parallel
-    {
-        #pragma omp single
-        {
-            LOG(rank, "Total threads: " << omp_get_num_threads());
+    // log simulation parameters
+    if (rank == 0) {
+        LOG(0, "simulation parameters:");
+        LOG(0, "  file: " << filename << ", dt: " << dt_str << ", t_end: " << t_end_str);
+        LOG(0, "  theta: " << theta << ", softening: " << softening);
+        LOG(0, "  visualization every " << vs_str << " to " << vs_dir);
+        if (body_count > 0) {
+            LOG(0, "  limiting number of bodies to " << body_count);
+        } else {
+            LOG(0, "  using all bodies from csv");
         }
     }
 
-    // Log simulation parameters
-    if (rank == 0) {
-        LOG(0, "Simulation parameters:");
-        LOG(0, "  File: " << filename << ", dt: " << dt << ", t_end: " << t_end);
-        LOG(0, "  theta: " << theta << ", softening: " << softening);
-        LOG(0, "  Visualization every " << vs << " days to " << vs_dir);
-    }
-
-    // Create visualization directory if it doesn't exist
+    // create visualization directory if it doesn't exist
     if (rank == 0 && !fs::exists(vs_dir) && !fs::create_directories(vs_dir)) {
-        std::cerr << "Error: Could not create directory: " << vs_dir << std::endl;
+        std::cerr << "error: could not create directory: " << vs_dir << std::endl;
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-    // Read input file and initialize masses, positions, and velocities
-    std::vector<double> masses;            // Vector to store masses of bodies
-    std::vector<Position> positions;       // Vector to store positions of bodies
-    std::vector<Velocity> velocities;      // Vector to store velocities of bodies
+   
 
-    int num_bodies = 0; // Total number of bodies in the simulation
+    std::vector<double> masses;            // vector to store masses of bodies
+    std::vector<Position> positions;       // vector to store positions of bodies
+    std::vector<Velocity> velocities;      // vector to store velocities of bodies
+    std::vector<std::string> names;        // vector to store names of bodies
+    std::vector<int> orbit_classes;        // vector to store orbit classes
+
+    int num_bodies = 0; // total number of bodies
     if (rank == 0) {
-        if (!readCSV(filename, masses, positions, velocities)) {
-            std::cerr << "Error: Could not read file: " << filename << std::endl;
+        // read csv and limit the number of bodies if specified
+        if (!readCSV(filename, masses, positions, velocities, names, orbit_classes, body_count)) {
+            std::cerr << "error: could not read file: " << filename << std::endl;
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
-        num_bodies = static_cast<int>(masses.size());
-        LOG(0, "Loaded " << num_bodies << " bodies.");
+        num_bodies = (int)masses.size(); // get the actual number of bodies read
+
+        LOG(0, "loaded " << num_bodies << " bodies" << ((body_count > 0 && body_count < num_bodies) ? " (truncated)" : "") << ".");
     }
 
-    // Broadcast number of bodies to all processes
+     // construct pvd filename including body count
+    std::string input_stem = fs::path(filename).stem().string();
+    std::string pvdFilename = "sim_" + input_stem + "_dt" + dt_str + "_tend" + t_end_str + "_vs" + vs_str + "_bodies" + std::to_string(num_bodies) + ".pvd";
+
+    // broadcast the number of bodies to all processes
     MPI_Bcast(&num_bodies, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    // Resize vectors on other processes
+    // resize vectors on other processes based on the number of bodies
     if (rank != 0) {
         masses.resize(num_bodies);
         positions.resize(num_bodies);
         velocities.resize(num_bodies);
+        names.resize(num_bodies);
+        orbit_classes.resize(num_bodies);
     }
 
-    // Broadcast masses, positions, and velocities to all processes
+    // broadcast masses and positions to all processes
     MPI_Bcast(masses.data(), num_bodies, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Bcast(positions.data(), num_bodies, MPI_POSITION, 0, MPI_COMM_WORLD);
-    MPI_Bcast(velocities.data(), num_bodies, MPI_VELOCITY, 0, MPI_COMM_WORLD);
+    MPI_Bcast(positions.data(), num_bodies, MPI_VECTOR, 0, MPI_COMM_WORLD);
 
-    // Distribute work among processes
-    int bodies_per_proc = num_bodies / size; // Base number of bodies per process
-    int remainder = num_bodies % size;       // Extra bodies to distribute
+    // determine the number of bodies per process
+    int bodies_per_proc = num_bodies / size; // base number of bodies per process
+    int remainder = num_bodies % size;       // extra bodies to distribute
 
-    std::vector<int> sendcounts(size); // Number of bodies each process will receive
-    std::vector<int> displs(size, 0);  // Displacement (starting index) for each process
-
-    int offset = 0;
-    for (int i = 0; i < size; ++i) {
-        sendcounts[i] = bodies_per_proc + (i < remainder ? 1 : 0);
-        displs[i] = offset;
-        offset += sendcounts[i];
+    std::vector<int> sendcounts(size), displs(size, 0);
+    {
+        int offset = 0;
+        for (int i = 0; i < size; i++) {
+            sendcounts[i] = bodies_per_proc + (i < remainder ? 1 : 0);
+            displs[i] = offset;
+            offset += sendcounts[i];
+        }
     }
 
-    int local_n = sendcounts[rank]; // Number of bodies for this process
+    int local_n = sendcounts[rank]; // number of bodies for this process
 
-    // Local data for each process
-    std::vector<double> local_masses(local_n);              // Local masses
-    std::vector<Position> local_positions(local_n);         // Local positions
-    std::vector<Velocity> local_velocities(local_n);        // Local velocities
-    std::vector<Acceleration> local_accelerations(local_n); // Local accelerations
+    // prepare to scatter names
+    int max_name_len = 0;
+    if (rank == 0) {
+        for (auto &nm : names) {
+            int len = (int)nm.size();
+            if (len > max_name_len) max_name_len = len;
+        }
+    }
+    MPI_Bcast(&max_name_len, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    // Scatter masses to all processes
+    int chunk_size = max_name_len + 1; // allocate extra space for null terminator
+    std::vector<char> all_names_buffer;
+    std::vector<int> name_sendcounts(size), name_displs(size, 0);
+    if (rank == 0) {
+        all_names_buffer.resize(num_bodies * chunk_size);
+        for (int i = 0; i < num_bodies; i++) {
+            std::string &nm = names[i];
+            int len = (int)nm.size();
+            if (len > max_name_len) len = max_name_len;
+            std::memcpy(&all_names_buffer[i * chunk_size], nm.c_str(), len);
+            for (int c = len; c < chunk_size; c++) {
+                all_names_buffer[i * chunk_size + c] = '\0';
+            }
+        }
+
+        for (int i = 0; i < size; i++) {
+            name_sendcounts[i] = sendcounts[i] * chunk_size;
+        }
+
+        int off = 0;
+        for (int i = 0; i < size; i++) {
+            name_displs[i] = off;
+            off += name_sendcounts[i];
+        }
+    }
+
+    std::vector<char> local_name_buffer(local_n * chunk_size);
+    MPI_Scatterv(all_names_buffer.data(), name_sendcounts.data(), name_displs.data(), MPI_CHAR,
+                 local_name_buffer.data(), local_n * chunk_size, MPI_CHAR,
+                 0, MPI_COMM_WORLD);
+
+    std::vector<std::string> local_names(local_n);
+    for (int i = 0; i < local_n; i++) {
+        local_names[i] = std::string(&local_name_buffer[i * chunk_size]);
+    }
+
+    // local data for each process
+    std::vector<double> local_masses(local_n);
+    std::vector<Position> local_positions(local_n);
+    std::vector<Velocity> local_velocities(local_n);
+    std::vector<int> local_orbit_classes(local_n);
+
+    // scatter masses to all processes
     MPI_Scatterv(masses.data(), sendcounts.data(), displs.data(), MPI_DOUBLE,
                  local_masses.data(), local_n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-    // Scatter positions to all processes
-    MPI_Scatterv(positions.data(), sendcounts.data(), displs.data(), MPI_POSITION,
-                 local_positions.data(), local_n, MPI_POSITION, 0, MPI_COMM_WORLD);
+    // Scatter positions
+    MPI_Scatterv(positions.data(), sendcounts.data(), displs.data(), MPI_VECTOR,
+                local_positions.data(), local_n, MPI_VECTOR, 0, MPI_COMM_WORLD);
 
-    // Scatter velocities to all processes
-    MPI_Scatterv(velocities.data(), sendcounts.data(), displs.data(), MPI_VELOCITY,
-                 local_velocities.data(), local_n, MPI_VELOCITY, 0, MPI_COMM_WORLD);
+    // Scatter velocities
+    MPI_Scatterv(velocities.data(), sendcounts.data(), displs.data(), MPI_VECTOR,
+                local_velocities.data(), local_n, MPI_VECTOR, 0, MPI_COMM_WORLD);
 
-    LOG(rank, "Process " << rank << " received " << local_n << " bodies starting at index " << displs[rank]);
+    // scatter orbit_classes to all processes
+    MPI_Scatterv(orbit_classes.data(), sendcounts.data(), displs.data(), MPI_INT,
+                 local_orbit_classes.data(), local_n, MPI_INT, 0, MPI_COMM_WORLD);
 
-    // All initialization is done, now start simulation timing
-    auto simulation_start = MPI_Wtime(); 
+    LOG(rank, "process " << rank << " received " << local_n << " bodies starting at index " << displs[rank]);
 
-    // Initialize simulation time and counters
-    double t = 0.0;      // Current simulation time in days
-    int step = 0;        // Simulation step counter
-    int vs_counter = 0;  // Visualization counter
+    auto simulation_start = MPI_Wtime(); // start simulation timing
 
-    // Compute initial accelerations
+    double t = 0.0;      // current simulation time in days
+    int step = 0;        // simulation step counter
+    int vs_counter = 0;  // visualization counter
+
+    // compute initial accelerations
+    std::vector<Acceleration> local_accelerations(local_n);
     computeAccelerations(masses, positions, local_masses, local_positions, local_accelerations, G, theta, softening);
 
-    // Main simulation loop
-    while (t < t_end) {
-        // Perform leapfrog integration, update velocities by half step and positions by full step
-        leapfrogIntegration(local_positions, local_velocities, local_accelerations, dt);
+    // main simulation loop
+    while (t < t_end_val) {
+        // perform leapfrog integration, update positions and half-step velocities
+        leapfrogIntegration(local_positions, local_velocities, local_accelerations, dt_val);
 
-        // Advance simulation time
-        t += dt;
+        // advance simulation time
+        t += dt_val;
         step++;
 
-        // Gather updated positions from all processes to compute accelerations
-        MPI_Allgatherv(local_positions.data(), local_n, MPI_POSITION,
-                       positions.data(), sendcounts.data(), displs.data(), MPI_POSITION, MPI_COMM_WORLD);
+        // gather updated positions from all processes for next acceleration calculation
+        MPI_Allgatherv(local_positions.data(), local_n, MPI_VECTOR,
+                    positions.data(), sendcounts.data(), displs.data(), MPI_VECTOR,
+                    MPI_COMM_WORLD);
 
-        // Compute accelerations at new positions using Barnes-Hut algorithm
+        // compute new accelerations based on updated positions
         computeAccelerations(masses, positions, local_masses, local_positions, local_accelerations, G, theta, softening);
 
-        // Update velocities by another half step using new accelerations
+        // update velocities by another half step using new accelerations
         #pragma omp parallel for
-        for (int i = 0; i < local_n; ++i) {
-            local_velocities[i].vx += local_accelerations[i].ax * dt * 0.5;
-            local_velocities[i].vy += local_accelerations[i].ay * dt * 0.5;
-            local_velocities[i].vz += local_accelerations[i].az * dt * 0.5;
+        for (int i = 0; i < local_n; i++) {
+            local_velocities[i].vx += local_accelerations[i].ax * dt_val * 0.5;
+            local_velocities[i].vy += local_accelerations[i].ay * dt_val * 0.5;
+            local_velocities[i].vz += local_accelerations[i].az * dt_val * 0.5;
         }
 
-        // Output visualization data at specified intervals
-        if (t >= vs_counter * vs) {
-            // Gather velocities to the main rank
-            MPI_Gatherv(local_velocities.data(), local_n, MPI_VELOCITY,
-                        velocities.data(), sendcounts.data(), displs.data(), MPI_VELOCITY, 0, MPI_COMM_WORLD);
+        // check if it's time to save visualization data
+        if (t >= vs_counter * vs_val) {
+  
+            // compute global energies
+            double kinetic_energy = 0.0, potential_energy = 0.0, total_energy = 0.0, virial_equilibrium = 0.0;
+            computeGlobalEnergiesParallel(masses, positions, local_velocities, G,
+                                        rank, size, displs, sendcounts, local_n,
+                                        kinetic_energy, potential_energy, total_energy, virial_equilibrium);
 
+            int body_id_offset = displs[rank];
+            // write the current state to vtp file
+            writeVTPFile(rank, vs_counter,
+                         local_masses, local_positions, local_velocities,
+                         local_accelerations, local_names, local_orbit_classes,
+                         body_id_offset,
+                         kinetic_energy, potential_energy, total_energy, virial_equilibrium,
+                         vs_dir);
+
+            
+
+            MPI_Barrier(MPI_COMM_WORLD); 
+            // ensure all vtp files are written before updating pvd
+            
             if (rank == 0) {
-                saveState(vs_dir, vs_counter, masses, positions, velocities); // Save current state to file
-                LOG(0, "Saved state for visualization step " << vs_counter);
+                // update the pvd file with the new timestep data
+                updatePVDFile(pvdFilename, size, vs_counter, t, vs_dir);
+                LOG(0, "saved state for visualization step " << vs_counter);
             }
+
             vs_counter++;
         }
     }
 
-    auto simulation_end = MPI_Wtime();
-    LOG(0, "Simulation completed.");
+    auto simulation_end = MPI_Wtime(); // end simulation timing
+    LOG(0, "simulation completed.");
 
-    // Output timing info
+    // output timing information
     if (rank == 0) {
-        std::cout << "SIMULATION_TIME " << (simulation_end - simulation_start) << std::endl;
-        std::cout << "TOTAL_TIME " << (MPI_Wtime() - total_start) << std::endl;
+        double dx = 0.0, dy = 0.0, dz = 0.0;
+        for (int i = 0; i < num_bodies; ++i) {
+            dx += positions[i].x;
+            dy += positions[i].y;
+            dz += positions[i].z;
+        }
+
+        std::cout << "SIMULATION_TIME: " << (simulation_end - simulation_start) << std::endl;
+        std::cout << "TOTAL_TIME: " << (MPI_Wtime() - total_start) << std::endl;
+        std::cout << "SUMMED_DIST: " << dx << " " << dy << " " << dz << std::endl;
     }
 
-    // Clean up MPI data types and finalize MPI
-    MPI_Type_free(&MPI_POSITION);
-    MPI_Type_free(&MPI_VELOCITY);
-    MPI_Type_free(&MPI_ACCELERATION);
+
+    // clean up mpi datatypes and finalize mpi
+    MPI_Type_free(&MPI_VECTOR);
     MPI_Finalize();
 
     return 0;
