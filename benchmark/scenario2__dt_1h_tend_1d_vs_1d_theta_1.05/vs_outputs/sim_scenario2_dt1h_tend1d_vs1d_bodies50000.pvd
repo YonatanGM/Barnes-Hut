@@ -1,0 +1,8 @@
+<VTKFile type="Collection" version="0.1" byte_order="LittleEndian" compressor="vtkZLibDataCompressor">
+    <Collection>
+        <DataSet timestep="1.04" group="" part="0" file="0/sim.1.vtp"/>
+        <DataSet timestep="1.04" group="" part="1" file="1/sim.1.vtp"/>
+        <DataSet timestep="1.04" group="" part="2" file="2/sim.1.vtp"/>
+        <DataSet timestep="1.04" group="" part="3" file="3/sim.1.vtp"/>
+    </Collection>
+</VTKFile>
