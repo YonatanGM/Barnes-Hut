@@ -191,14 +191,15 @@ for current_theta in "${sorted_theta_values[@]:1}"; do
     dz=$(echo "$metrics" | awk '{print $5}')
 
     if [ "$simulation_time" != "na" ] && [ "$total_time" != "na" ] && [ "$dx" != "na" ] && [ "$dy" != "na" ] && [ "$dz" != "na" ]; then
-        # Calculate differences from reference
-        dx_diff=$(echo "$dx - $dx_ref" | bc -l)
-        dy_diff=$(echo "$dy - $dy_ref" | bc -l)
-        dz_diff=$(echo "$dz - $dz_ref" | bc -l)
+        # Replace the bc commands with awk for arithmetic operations
+        dx_diff=$(echo "$dx $dx_ref" | awk '{print $1 - $2}')
+        dy_diff=$(echo "$dy $dy_ref" | awk '{print $1 - $2}')
+        dz_diff=$(echo "$dz $dz_ref" | awk '{print $1 - $2}')
 
-        # Calculate the magnitude of the difference vector
-        distance_sum_diff=$(echo "scale=6; sqrt(($dx_diff)^2 + ($dy_diff)^2 + ($dz_diff)^2)" | bc -l)
-        distance_sum_diff=$(printf "%.6f" "$distance_sum_diff")
+        # Calculate the magnitude of the difference vector using awk
+        distance_sum_diff=$(echo "$dx_diff $dy_diff $dz_diff" | awk '{print sqrt(($1)^2 + ($2)^2 + ($3)^2)}')
+        distance_sum_diff=$(printf "%.6f" "$distance_sum_diff")  # Format to 6 decimal places
+
     else
         distance_sum_diff="na"
     fi
