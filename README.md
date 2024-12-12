@@ -33,7 +33,7 @@ The acceleration calculations, position, and velocity updates are parallelized w
 ---
 
 ## Results
-The datasets (CSV) for Scenario 1 and Scenario 2 are in the `data` folder. The final timestep CSV files for both scenarios, along with screenshots from ParaView, are also in the same folder.
+The datasets (CSV) for Scenario 1 and Scenario 2 are in the `data` folder. The final timestep CSV files for both scenarios, along with screenshots from ParaView (with energy plot), are also in the same folder.
 
 ### Scenario 1
 ```bash
