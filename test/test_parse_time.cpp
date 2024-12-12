@@ -1,9 +1,7 @@
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include <string>
-
-// include the function prototype from main.cpp
-double parseTime(const std::string& timeStr);
+#include "parse_time.h"
 
 TEST(ParseTimeTest, ValidFractionalInputs) {
     EXPECT_DOUBLE_EQ(parseTime("0.5h"), 0.5 / 24.0);
