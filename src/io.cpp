@@ -353,7 +353,6 @@ void updatePVDFile(const std::string &pvdFilename,
     std::string fullPVDPath = vs_dir + "/" + pvdFilename;
 
     if (vs_counter == 0) {
-        // create a new .pvd file or overwrite existing one
         vtkFile = doc.NewElement("VTKFile");
         vtkFile->SetAttribute("type", "Collection");
         vtkFile->SetAttribute("version", "0.1");
@@ -361,17 +360,11 @@ void updatePVDFile(const std::string &pvdFilename,
         vtkFile->SetAttribute("compressor", "vtkZLibDataCompressor");
         doc.InsertFirstChild(vtkFile);
 
-        // Create the Collection element
         collection = doc.NewElement("Collection");
         vtkFile->InsertEndChild(collection);
-    }
-    else {
-
-        // attempt to load the existing .pvd file
-        e = doc.LoadFile(pvdFilename.c_str());
-
+    } else {
+        e = doc.LoadFile(fullPVDPath.c_str());
         if (e != XML_SUCCESS) {
-            // if loading fails like file doesnt exist, create a new .pvd structure
             vtkFile = doc.NewElement("VTKFile");
             vtkFile->SetAttribute("type", "Collection");
             vtkFile->SetAttribute("version", "0.1");
@@ -381,59 +374,33 @@ void updatePVDFile(const std::string &pvdFilename,
 
             collection = doc.NewElement("Collection");
             vtkFile->InsertEndChild(collection);
-        }
-        else {
-            // locate the VTKFile element
+        } else {
             vtkFile = doc.FirstChildElement("VTKFile");
-            if (!vtkFile) {
-                // if VTKFile element is missing, recreate it
-                doc.Clear();
-                vtkFile = doc.NewElement("VTKFile");
-                vtkFile->SetAttribute("type", "Collection");
-                vtkFile->SetAttribute("version", "0.1");
-                vtkFile->SetAttribute("byte_order", "LittleEndian");
-                vtkFile->SetAttribute("compressor", "vtkZLibDataCompressor");
-                doc.InsertFirstChild(vtkFile);
-
+            collection = vtkFile ? vtkFile->FirstChildElement("Collection") : nullptr;
+            if (!collection) {
                 collection = doc.NewElement("Collection");
                 vtkFile->InsertEndChild(collection);
-            }
-            else {
-                // locate the Collection element within VTKFile
-                collection = vtkFile->FirstChildElement("Collection");
-                if (!collection) {
-                    // if Collection element is missing, create it
-                    collection = doc.NewElement("Collection");
-                    vtkFile->InsertEndChild(collection);
-                }
             }
         }
     }
 
-    // **Add DataSet elements for each MPI rank**
-
-    // Format the current_time with two decimal places
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(2) << current_time;
     std::string t_str = oss.str();
 
     for (int r = 0; r < size; r++) {
-        // create a new DataSet element
         XMLElement* dataSet = doc.NewElement("DataSet");
         dataSet->SetAttribute("timestep", t_str.c_str());
         dataSet->SetAttribute("group", "");
         dataSet->SetAttribute("part", r);
 
-        // construct the file reference path
         std::ostringstream fileRef;
-        fileRef << r << "/sim." << vs_counter << ".vtp";  // Relative path within the directory
+        fileRef << r << "/sim." << vs_counter << ".vtp";
         dataSet->SetAttribute("file", fileRef.str().c_str());
 
-        // append the DataSet to the Collection
         collection->InsertEndChild(dataSet);
     }
 
-    // save the pvd
     XMLError saveResult = doc.SaveFile(fullPVDPath.c_str());
     if (saveResult != XML_SUCCESS) {
         std::cerr << "Error saving .pvd file: " << fullPVDPath << std::endl;
