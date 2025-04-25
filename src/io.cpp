@@ -285,7 +285,7 @@ void writeVTPFile(int rank, int vs_counter,
         writeIntArray("orbit_class", local_orbit_classes);
     }
 
-    // FieldData 
+    // FieldData
     {
         XMLElement* fieldData = doc.NewElement("FieldData");
         polyData->InsertEndChild(fieldData);
@@ -337,7 +337,6 @@ void writeVTPFile(int rank, int vs_counter,
 }
 
  // function to update (or create) a pvd file that references all vtp files for the given timestep
- // function to update (or create) a pvd file that references all vtp files for the given timestep
 void updatePVDFile(const std::string &pvdFilename,
                    int size,
                    int vs_counter,
@@ -350,6 +349,8 @@ void updatePVDFile(const std::string &pvdFilename,
 
     XMLElement* vtkFile = nullptr;
     XMLElement* collection = nullptr;
+
+    std::string pvdPath = (std::filesystem::path(vs_dir) / pvdFilename).string();
 
     if (vs_counter == 0) {
         // create a new .pvd file or overwrite existing one
@@ -367,7 +368,7 @@ void updatePVDFile(const std::string &pvdFilename,
     else {
 
         // attempt to load the existing .pvd file
-        e = doc.LoadFile(pvdFilename.c_str());
+        e = doc.LoadFile(pvdPath.c_str());
 
         if (e != XML_SUCCESS) {
             // if loading fails like file doesnt exist, create a new .pvd structure
@@ -409,7 +410,7 @@ void updatePVDFile(const std::string &pvdFilename,
         }
     }
 
-    // **Add DataSet elements for each MPI rank**
+    // Add DataSet elements for each MPI rank**
 
     // Format the current_time with two decimal places
     std::ostringstream oss;
@@ -420,12 +421,12 @@ void updatePVDFile(const std::string &pvdFilename,
         // create a new DataSet element
         XMLElement* dataSet = doc.NewElement("DataSet");
         dataSet->SetAttribute("timestep", t_str.c_str());
-        dataSet->SetAttribute("group", "");
+        // dataSet->SetAttribute("group", "");
         dataSet->SetAttribute("part", r);
 
         // construct the file reference path
         std::ostringstream fileRef;
-        fileRef << vs_dir << "/" << r << "/sim." << vs_counter << ".vtp";
+        fileRef << r << "/sim." << vs_counter << ".vtp";
         dataSet->SetAttribute("file", fileRef.str().c_str());
 
         // append the DataSet to the Collection
@@ -433,8 +434,9 @@ void updatePVDFile(const std::string &pvdFilename,
     }
 
     // save the pvd
-    XMLError saveResult = doc.SaveFile(pvdFilename.c_str());
+
+    XMLError saveResult = doc.SaveFile(pvdPath.c_str());
     if (saveResult != XML_SUCCESS) {
-        std::cerr << "Error saving .pvd file: " << pvdFilename << std::endl;
+        std::cerr << "Error saving .pvd file: " << pvdPath << std::endl;
     }
 }
