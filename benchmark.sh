@@ -16,7 +16,7 @@ set -x
 file=${1:-"../data/scenario2_306051.csv"}
 dt=${2:-"1h"}
 t_end=${3:-"1d"}
-vs=${4:-"1d"}
+vs=${4:-"2h"}
 theta=${5:-"1.05"}
 
 # Setup Benchmark Directory
@@ -74,40 +74,53 @@ fi
 #   2. nodes
 #   3. threads
 #   4. theta
+#   5. is_reference, default "false"
 # Returns:
-#   simulation_time total_time dx dy dz
+#   simulation_time total_time summed_dist
 run_simulation() {
     local bodies=$1
     local nodes=$2
     local threads=$3
     local current_theta=$4
+    local is_ref=${5:-false}
 
     # Set the number of OpenMP threads
     export OMP_NUM_THREADS=$threads
 
-    # Run the simulation and capture output
-    simulation_output=$(srun --exclusive -N "$nodes" "$simulate_binary" \
-        --file "$file" --dt "$dt" --t_end "$t_end" --vs "$vs" \
-        --vs_dir "${OLDPWD}/${benchmark_dir}/vs_outputs" --theta "$current_theta" --bodies "$bodies" --log 2>&1)
+    # # Run the simulation and capture output
+    # simulation_output=$(srun --exclusive -N "$nodes" "$simulate_binary" \
+    #     --file "$file" --dt "$dt" --t_end "$t_end" --vs "$vs" \
+    #     --vs_dir "${OLDPWD}/${benchmark_dir}/vs_outputs" --theta "$current_theta" --bodies "$bodies" --log 2>&1)
+    # build the command array
+    # mpirun -np, srun --exclusive -N
+    local cmd=(mpirun -np "$nodes" "$simulate_binary"
+                --file "$file"
+                --dt   "$dt"
+                --t_end "$t_end"
+                --vs   "$vs"
+                --vs_dir "${OLDPWD}/${benchmark_dir}/vs_outputs"
+                --theta "$current_theta"
+                --bodies "$bodies"
+                --log )
+    # if it's the reference run, append the flag
+    if [ "$is_ref" = "true" ]; then
+        cmd+=( -r )
+    fi
+
+    # run and capture stdout+stderr
+    simulation_output=$("${cmd[@]}" 2>&1)
 
     # Extract SIMULATION_TIME, TOTAL_TIME, and SUMMED_DIST components
     simulation_time=$(echo "$simulation_output" | grep "SIMULATION_TIME" | awk '{print $2}')
     total_time=$(echo "$simulation_output" | grep "TOTAL_TIME" | awk '{print $2}')
-    summed_dist_line=$(echo "$simulation_output" | grep "SUMMED_DIST")
+    summed_dist=$(echo "$simulation_output" | grep "SUMMED_DIST" | awk '{print $2}')
 
-    # Extract dx, dy, dz from SUMMED_DIST
-    dx=$(echo "$summed_dist_line" | awk '{print $2}')
-    dy=$(echo "$summed_dist_line" | awk '{print $3}')
-    dz=$(echo "$summed_dist_line" | awk '{print $4}')
-
-    # Handle cases where metrics aren't found
+    # fall back to "na" if missing
     simulation_time=${simulation_time:-na}
     total_time=${total_time:-na}
-    dx=${dx:-na}
-    dy=${dy:-na}
-    dz=${dz:-na}
+    summed_dist=${summed_dist:-na}
 
-    echo "$simulation_time $total_time $dx $dy $dz"
+    echo "$simulation_time $total_time $summed_dist"
 }
 
 # =======================
@@ -116,12 +129,12 @@ run_simulation() {
 fixed_nodes=4
 fixed_threads=32
 fixed_theta=1.05
-fixed_bodies=300000  # Adjust as needed
+fixed_bodies=5000  # Adjust as needed
 
 echo "Starting Phase 1: Runtime vs. Number of Bodies"
 for bodies in "${body_counts[@]}"; do
     metrics=$(run_simulation "$bodies" "$fixed_nodes" "$fixed_threads" "$fixed_theta")
-    total_time=$(echo "$metrics" | awk '{print $2}')
+    total_time=$(echo "$metrics" | awk '{print $1}')
     echo "$bodies $fixed_nodes $fixed_threads $total_time" >> "${OLDPWD}/${data_bodies_file}"
 done
 echo "Phase 1 completed."
@@ -132,7 +145,7 @@ echo "Phase 1 completed."
 echo "Starting Phase 2: Runtime vs. OpenMP Threads"
 for threads in "${thread_counts[@]}"; do
     metrics=$(run_simulation "$fixed_bodies" "$fixed_nodes" "$threads" "$fixed_theta")
-    total_time=$(echo "$metrics" | awk '{print $2}')
+    total_time=$(echo "$metrics" | awk '{print $1}')
     echo "$fixed_nodes $threads $total_time" >> "${OLDPWD}/${data_threads_file}"
 done
 echo "Phase 2 completed."
@@ -143,7 +156,7 @@ echo "Phase 2 completed."
 echo "Starting Phase 3: Runtime vs. MPI Nodes"
 for nodes in "${node_counts[@]}"; do
     metrics=$(run_simulation "$fixed_bodies" "$nodes" "$fixed_threads" "$fixed_theta")
-    total_time=$(echo "$metrics" | awk '{print $2}')
+    total_time=$(echo "$metrics" | awk '{print $1}')
     echo "$fixed_threads $nodes $total_time" >> "${OLDPWD}/${data_nodes_file}"
 done
 echo "Phase 3 completed."
@@ -161,54 +174,74 @@ reference_theta=${sorted_theta_values[0]}
 echo "Reference theta: $reference_theta"
 
 # Run the reference simulation
-metrics_ref=$(run_simulation "$fixed_bodies" "$fixed_nodes" "$fixed_threads" "$reference_theta")
+
+# Run the reference simulation *with* the -r flag
+metrics_ref=$(run_simulation \
+    "$fixed_bodies" "$fixed_nodes" "$fixed_threads" \
+    "$reference_theta" "true")
+
+# parse out the three fields
 simulation_time_ref=$(echo "$metrics_ref" | awk '{print $1}')
 total_time_ref=$(echo "$metrics_ref" | awk '{print $2}')
-dx_ref=$(echo "$metrics_ref" | awk '{print $3}')
-dy_ref=$(echo "$metrics_ref" | awk '{print $4}')
-dz_ref=$(echo "$metrics_ref" | awk '{print $5}')
+dist=$(echo "$metrics_ref" | awk '{print $3}')
+
 
 # Validate reference metrics
-if [ "$simulation_time_ref" = "na" ] || [ "$total_time_ref" = "na" ] || [ "$dx_ref" = "na" ] || [ "$dy_ref" = "na" ] || [ "$dz_ref" = "na" ]; then
+if [ "$simulation_time_ref" = "na" ] || [ "$total_time_ref" = "na" ] || [ "$dist" = "na" ]; then
     echo "Error: Missing metrics in reference run with Theta: $reference_theta. Aborting."
     exit 1
 fi
 
-echo "Reference run completed: Theta=$reference_theta, TOTAL_TIME=$total_time_ref"
+echo "Reference run completed: Theta=$reference_theta, TOTAL_TIME=$simulation_time_ref, SUMMED_DIST=$dist"
 
 # Record reference metrics with distance_sum_diff=0
-echo "$reference_theta $total_time_ref 0" >> "${OLDPWD}/${data_theta_file}"
+echo "$reference_theta $simulation_time_ref 0" >> "${OLDPWD}/${data_theta_file}"
+
+# Now loop the other thetas
+for current_theta in "${sorted_theta_values[@]:1}"; do
+    echo "Running θ = $current_theta …"
+    metrics=$(run_simulation \
+        "$fixed_bodies" "$fixed_nodes" "$fixed_threads" \
+        "$current_theta" "false")
+
+    sim_time=$(echo "$metrics" | awk '{print $1}')
+    tot_time=$(echo "$metrics" | awk '{print $2}')
+    dist=$(echo "$metrics" | awk '{print $3}')
+
+    echo "θ=$current_theta, TOTAL_TIME=$tot_time, SUMMED_DIST=$dist"
+    echo "$current_theta $sim_time $dist" >> "${OLDPWD}/${data_theta_file}"
+done
 
 # Run simulations for other thetas and compute distance_sum_diff
-for current_theta in "${sorted_theta_values[@]:1}"; do
-    echo "Running benchmark simulation with Theta: $current_theta"
+# for current_theta in "${sorted_theta_values[@]:1}"; do
+#     echo "Running benchmark simulation with Theta: $current_theta"
 
-    metrics=$(run_simulation "$fixed_bodies" "$fixed_nodes" "$fixed_threads" "$current_theta")
-    simulation_time=$(echo "$metrics" | awk '{print $1}')
-    total_time=$(echo "$metrics" | awk '{print $2}')
-    dx=$(echo "$metrics" | awk '{print $3}')
-    dy=$(echo "$metrics" | awk '{print $4}')
-    dz=$(echo "$metrics" | awk '{print $5}')
+#     metrics=$(run_simulation "$fixed_bodies" "$fixed_nodes" "$fixed_threads" "$current_theta")
+#     simulation_time=$(echo "$metrics" | awk '{print $1}')
+#     total_time=$(echo "$metrics" | awk '{print $2}')
+#     dx=$(echo "$metrics" | awk '{print $3}')
+#     dy=$(echo "$metrics" | awk '{print $4}')
+#     dz=$(echo "$metrics" | awk '{print $5}')
 
-    if [ "$simulation_time" != "na" ] && [ "$total_time" != "na" ] && [ "$dx" != "na" ] && [ "$dy" != "na" ] && [ "$dz" != "na" ]; then
-        # Replace the bc commands with awk for arithmetic operations
-        dx_diff=$(echo "$dx $dx_ref" | awk '{print $1 - $2}')
-        dy_diff=$(echo "$dy $dy_ref" | awk '{print $1 - $2}')
-        dz_diff=$(echo "$dz $dz_ref" | awk '{print $1 - $2}')
+#     if [ "$simulation_time" != "na" ] && [ "$total_time" != "na" ] && [ "$dx" != "na" ] && [ "$dy" != "na" ] && [ "$dz" != "na" ]; then
+#         # Replace the bc commands with awk for arithmetic operations
+#         dx_diff=$(echo "$dx $dx_ref" | awk '{print $1 - $2}')
+#         dy_diff=$(echo "$dy $dy_ref" | awk '{print $1 - $2}')
+#         dz_diff=$(echo "$dz $dz_ref" | awk '{print $1 - $2}')
 
-        # Calculate the magnitude of the difference vector using awk
-        distance_sum_diff=$(echo "$dx_diff $dy_diff $dz_diff" | awk '{print sqrt(($1)^2 + ($2)^2 + ($3)^2)}')
-        distance_sum_diff=$(printf "%.6f" "$distance_sum_diff")  # Format to 6 decimal places
+#         # Calculate the magnitude of the difference vector using awk
+#         distance_sum_diff=$(echo "$dx_diff $dy_diff $dz_diff" | awk '{print sqrt(($1)^2 + ($2)^2 + ($3)^2)}')
+#         distance_sum_diff=$(printf "%.6f" "$distance_sum_diff")  # Format to 6 decimal places
 
-    else
-        distance_sum_diff="na"
-    fi
+#     else
+#         distance_sum_diff="na"
+#     fi
 
-    echo "Theta: $current_theta, TOTAL_TIME: $total_time, Distance Sum Diff: $distance_sum_diff"
+#     echo "Theta: $current_theta, TOTAL_TIME: $total_time, Distance Sum Diff: $distance_sum_diff"
 
-    # Record the metrics
-    echo "$current_theta $total_time $distance_sum_diff" >> "${OLDPWD}/${data_theta_file}"
-done
+#     # Record the metrics
+#     echo "$current_theta $total_time $distance_sum_diff" >> "${OLDPWD}/${data_theta_file}"
+# done
 
 echo "Phase 4 completed."
 
