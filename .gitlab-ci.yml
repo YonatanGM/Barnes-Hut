@@ -39,3 +39,4 @@ generate_coverage:
     paths:
       - $BUILD_DIR/coverage
     when: always
+  coverage: '/lines.*: ([0-9]+\.[0-9]+)%/'
