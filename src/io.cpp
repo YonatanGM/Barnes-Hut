@@ -143,6 +143,7 @@ void saveState(const std::string& vs_dir, int vs_counter,
     }
 }
 
+
 // function to write a vtp file for visualization
 void writeVTPFile(int rank, int vs_counter,
                   const std::vector<double> &local_masses,
@@ -439,4 +440,66 @@ void updatePVDFile(const std::string &pvdFilename,
     if (saveResult != XML_SUCCESS) {
         std::cerr << "Error saving .pvd file: " << pvdPath << std::endl;
     }
+}
+
+// Write CSV for a single timestep’s positions.
+void saveReferenceStepCSV(const std::string& dir,
+                          int step,
+                          const std::vector<Position>& pos) {
+    std::ostringstream fn;
+    fn << dir << "/ref_step_" << std::setw(5) << std::setfill('0')
+       << step << ".csv";
+    std::ofstream os(fn.str());
+    os << "id,x,y,z\n";
+    for (int i = 0; i < (int)pos.size(); ++i) {
+        os << i << ","
+           << pos[i].x << "," << pos[i].y << "," << pos[i].z << "\n";
+    }
+}
+
+// Load exactly the CSV back into a vector<Position>
+std::vector<Position>
+loadReferenceStepCSV(const std::string& dir,
+                     int step,
+                     int num_bodies) {
+    // build the filename
+    std::ostringstream fn;
+    fn << dir << "/ref_step_"
+       << std::setw(5) << std::setfill('0') << step
+       << ".csv";
+    const std::string path = fn.str();
+
+    // try to open
+    std::ifstream is(path);
+    if (!is.is_open()) {
+        // either file doesn't exist, or permission denied, etc.
+        throw std::runtime_error("could not open reference CSV: " + path);
+    }
+
+    // now we're safe to read header + data
+    std::string line;
+    std::getline(is, line);  // skip header
+
+    std::vector<Position> pos(num_bodies);
+    while (std::getline(is, line)) {
+        std::istringstream ss(line);
+        int id; char comma;
+        double x,y,z;
+        ss >> id >> comma >> x >> comma >> y >> comma >> z;
+        pos[id] = {x,y,z};
+    }
+    return pos;
+}
+
+// Sum Euclidean distance between corresponding points in a and b
+double computeDistanceSum(const std::vector<Position>& a,
+                          const std::vector<Position>& b) {
+    double sum = 0.0;
+    for (size_t i = 0; i < a.size(); ++i) {
+        double dx = a[i].x - b[i].x;
+        double dy = a[i].y - b[i].y;
+        double dz = a[i].z - b[i].z;
+        sum += std::sqrt(dx*dx + dy*dy + dz*dz);
+    }
+    return sum;
 }

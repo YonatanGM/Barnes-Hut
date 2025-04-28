@@ -44,4 +44,22 @@ void writeVTPFile(int rank, int vs_counter,
                    double current_time,
                    const std::string &vs_dir);
 
+
+// Write one timestep’s positions to a small CSV named ref_step_<step>.csv
+void saveReferenceStepCSV(const std::string& dir,
+                          int step,
+                          const std::vector<Position>& pos);
+
+// Load exactly that one CSV back into a Position vector
+std::vector<Position>
+loadReferenceStepCSV(const std::string& dir,
+                     int step,
+                     int num_bodies);
+
+// Compute the sum of per‐body Euclidean distances between two Position arrays
+double computeDistanceSum(const std::vector<Position>& a,
+                          const std::vector<Position>& b);
+
+
+
 #endif
