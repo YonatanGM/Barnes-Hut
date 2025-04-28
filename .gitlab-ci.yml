@@ -1,46 +1,41 @@
 image: ubuntu:22.04
 
 stages:
+  - build
   - test
+  - coverage
 
 variables:
   BUILD_DIR: build
 
 before_script:
-  # avoid any interactive prompts, update package lists
   - export DEBIAN_FRONTEND=noninteractive
   - apt-get update -qq
+  - apt-get install -qq -y build-essential cmake libomp-dev libopenmpi-dev openmpi-bin lcov
 
-  # install compiler, CMake, OpenMP, MPI, and coverage tools
-  - apt-get install -qq -y \
-      build-essential \          # gcc, g++, make
-      cmake \                     # CMake itself
-      libomp-dev \                # OpenMP headers/libs
-      libopenmpi-dev openmpi-bin  # MPI headers & mpirun
-      lcov                        # coverage capture & genhtml
-
-test_and_coverage:
-  stage: test
+build_project:
+  stage: build
   script:
     - mkdir -p $BUILD_DIR && cd $BUILD_DIR
-
-    # turn on coverage, tests, & Debug build
-    - cmake \
-        -DENABLE_COVERAGE=ON \
-        -DWITH_TESTS=ON \
-        -DCMAKE_BUILD_TYPE=Debug \
-        ..
-
-    # compile (library, simulate, tests, coverage target)
+    - cmake -DENABLE_COVERAGE=ON -DWITH_TESTS=ON -DCMAKE_BUILD_TYPE=Debug ..
     - make -j$(nproc)
-
-    # run tests
-    - ctest --output-on-failure
-
-    # generate coverage HTML under build/coverage/
-    - make coverage
-
   artifacts:
     paths:
-      - $BUILD_DIR/coverage   # grab the HTML report as an artifact
-    when: always             # even if tests fail, keep the coverage dir
+      - $BUILD_DIR
+    expire_in: 1 hour
+
+test_project:
+  stage: test
+  script:
+    - cd $BUILD_DIR
+    - ctest --output-on-failure
+
+generate_coverage:
+  stage: coverage
+  script:
+    - cd $BUILD_DIR
+    - make coverage
+  artifacts:
+    paths:
+      - $BUILD_DIR/coverage
+    when: always
