@@ -19,11 +19,11 @@ FetchContent_MakeAvailable(googletest)
 
 # Include directories for the code under test
 include_directories(${CMAKE_SOURCE_DIR})
-include_directories(${CMAKE_SOURCE_DIR}/include) 
+include_directories(${CMAKE_SOURCE_DIR}/include)
 # Define tests for the project
-add_executable(test_parse_time test_parse_time.cpp) 
-target_link_libraries(test_parse_time PRIVATE gtest gtest_main) 
-add_test(NAME test_parse_time COMMAND test_parse_time) 
+add_executable(test_parse_time test_parse_time.cpp)
+target_link_libraries(test_parse_time PRIVATE gtest gtest_main)
+add_test(NAME test_parse_time COMMAND test_parse_time)
 
 add_executable(test_io test_io.cpp ../src/io.cpp)
 target_link_libraries(test_io PRIVATE solar_system_lib gtest gtest_main)
@@ -41,25 +41,22 @@ add_executable(test_barnes_hut test_barnes_hut.cpp ../src/barnes_hut.cpp ../src/
 target_link_libraries(test_barnes_hut PRIVATE solar_system_lib gtest gtest_main)
 add_test(NAME test_barnes_hut COMMAND test_barnes_hut)
 
-# Include CodeCoverage.cmake
-include(CodeCoverage.cmake)
-# Append coverage compiler flags
-APPEND_COVERAGE_COMPILER_FLAGS()
-
 setup_target_for_coverage_lcov(
-    NAME coverage               
-    EXECUTABLE ctest --output-on-failure || true 
-    DEPENDENCIES                 
+    NAME coverage
+    EXECUTABLE ctest --output-on-failure || true
+    DEPENDENCIES
         test_parse_time
         test_io
         test_integration
         test_octree
         test_barnes_hut
-  
-    EXCLUDE 
-      "${CMAKE_SOURCE_DIR}/build/*"  # Exclude build directory
-      "${CMAKE_SOURCE_DIR}/build/_deps/*"  # Exclude _deps directory
+
+    LCOV_ARGS "--ignore-errors" "inconsistent,unused"
+
+    EXCLUDE
+      "${CMAKE_BINARY_DIR}/*"  # Exclude build directory
+      "${CMAKE_BINARY_DIR}/_deps/*"  # Exclude _deps directory
       "/usr/*"                        # Exclude system headers
-      "${CMAKE_SOURCE_DIR}/test/*"    
+      "${CMAKE_SOURCE_DIR}/test/*"
       "${CMAKE_SOURCE_DIR}/include/*"  # exclude include directory
 )
