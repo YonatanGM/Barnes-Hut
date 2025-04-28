@@ -51,7 +51,7 @@ setup_target_for_coverage_lcov(
         test_octree
         test_barnes_hut
 
-    LCOV_ARGS "--ignore-errors" "inconsistent,unused"
+    LCOV_ARGS "--ignore-errors" "inconsistent,unused,mismatch"
 
     EXCLUDE
       "${CMAKE_BINARY_DIR}/*"  # Exclude build directory
