@@ -11,7 +11,7 @@ variables:
 before_script:
   - export DEBIAN_FRONTEND=noninteractive
   - apt-get update -qq
-  - apt-get install -qq -y build-essential cmake libomp-dev libopenmpi-dev openmpi-bin lcov
+  - apt-get install -qq -y build-essential cmake libomp-dev libopenmpi-dev openmpi-bin lcov git
 
 build_project:
   stage: build
