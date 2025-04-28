@@ -14,7 +14,7 @@ before_script:
   - apt-get install -qq -y build-essential cmake libomp-dev libopenmpi-dev openmpi-bin git lcov
   - lcov --version
 
-build_project:
+build:
   stage: build
   script:
     - mkdir -p $BUILD_DIR && cd $BUILD_DIR
@@ -25,7 +25,7 @@ build_project:
       - $BUILD_DIR
     expire_in: 1 hour
 
-test_project:
+test:
   stage: test
   script:
     - cd $BUILD_DIR
@@ -38,6 +38,6 @@ generate_coverage:
     - make coverage
   artifacts:
     paths:
-      - $BUILD_DIR/coverage
+      - $BUILD_DIR/test/coverage
     when: always
   coverage: '/lines.*: ([0-9]+\.[0-9]+)%/'
