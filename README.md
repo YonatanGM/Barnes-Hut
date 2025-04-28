@@ -1,5 +1,7 @@
 # Parallel N-body Simulation
 [![Pipeline Status](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/badges/phase-1/pipeline.svg)](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/-/pipelines)
+[![Coverage](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/badges/phase-1/coverage.svg)](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/-/pipelines)
+
 
 ## Building the Project
 To build the project, run:
