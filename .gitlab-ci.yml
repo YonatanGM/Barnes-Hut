@@ -1,4 +1,4 @@
-image: ubuntu:22.04
+image: ubuntu:24.04
 
 stages:
   - build
@@ -11,9 +11,7 @@ variables:
 before_script:
   - export DEBIAN_FRONTEND=noninteractive
   - apt-get update -qq
-  - apt-get install -qq -y build-essential cmake libomp-dev libopenmpi-dev openmpi-bin git wget
-  - wget -qO- https://github.com/linux-test-project/lcov/archive/refs/tags/v2.2.tar.gz | tar xz
-  - cd lcov-2.2 && make install && cd ..
+  - apt-get install -qq -y build-essential cmake libomp-dev libopenmpi-dev openmpi-bin git lcov
   - lcov --version
 
 build_project:
