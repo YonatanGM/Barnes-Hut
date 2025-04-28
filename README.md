@@ -1,4 +1,5 @@
 # Parallel N-body Simulation
+[![Pipeline Status](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/badges/main/pipeline.svg)](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/-/pipelines)
 
 ## Building the Project
 To build the project, run:
@@ -16,19 +17,19 @@ make coverage
 ---
 
 ## Approach
-- The root process broadcasts the total number of bodies, their masses, initial positions, and velocities to all MPI ranks using `MPI_Bcast`, so all ranks start with the same global data.  
-- Masses, positions, velocities, names, and orbit classes are distributed to MPI ranks using `MPI_Scatterv`, giving each rank a subset of bodies to handle.  
-- Each rank calculates the initial accelerations for its assigned bodies using their local data and global data (like positions and masses of all bodies) before entering the simulation loop.  
+- The root process broadcasts the total number of bodies, their masses, initial positions, and velocities to all MPI ranks using `MPI_Bcast`, so all ranks start with the same global data.
+- Masses, positions, velocities, names, and orbit classes are distributed to MPI ranks using `MPI_Scatterv`, giving each rank a subset of bodies to handle.
+- Each rank calculates the initial accelerations for its assigned bodies using their local data and global data (like positions and masses of all bodies) before entering the simulation loop.
 
 Inside the simulation loop:
-- Each rank performs a full-step position update and a half-step velocity update for its assigned bodies.  
-- Updated positions are gathered globally across all ranks using `MPI_Allgatherv`, ensuring that every rank has the full updated state of all bodies needed for the next computation.  
-- A second half-step velocity update is performed to finalize the integration step.  
-- Accelerations are calculated for each body based on the updated global positions using the Barnes-Hut algorithm. 
-- Global kinetic and potential energies are calculated by summing contributions from all ranks using `MPI_Allreduce`.  
-- Each rank writes VTP files for its assigned bodies, while the root rank manages updates to the PVD file that aggregates all outputs. 
+- Each rank performs a full-step position update and a half-step velocity update for its assigned bodies.
+- Updated positions are gathered globally across all ranks using `MPI_Allgatherv`, ensuring that every rank has the full updated state of all bodies needed for the next computation.
+- A second half-step velocity update is performed to finalize the integration step.
+- Accelerations are calculated for each body based on the updated global positions using the Barnes-Hut algorithm.
+- Global kinetic and potential energies are calculated by summing contributions from all ranks using `MPI_Allreduce`.
+- Each rank writes VTP files for its assigned bodies, while the root rank manages updates to the PVD file that aggregates all outputs.
 
-The acceleration calculations, position, and velocity updates are parallelized with OpenMP. We tried parallel octree construction on multiple threads but didn't see performance gains (performs similarly or slightly worse). The implementation is included in this project. 
+The acceleration calculations, position, and velocity updates are parallelized with OpenMP. We tried parallel octree construction on multiple threads but didn't see performance gains (performs similarly or slightly worse). The implementation is included in this project.
 
 ---
 
@@ -57,7 +58,7 @@ This shows how runtime changes as the number of bodies increases, with 4 MPI nod
 
 ![Runtime vs. Number of Bodies](benchmark/scenario2__dt_1h_tend_1d_vs_1d_theta_1.05/plot_bodies.png)
 
-**Analysis:**  
+**Analysis:**
 The runtime increases linearly with the number of bodies. This makes sense because more bodies mean more interactions to calculate.
 
 ---
@@ -67,7 +68,7 @@ This shows how runtime changes as we add more MPI nodes, keeping 32 OpenMP threa
 
 ![Runtime vs. MPI Nodes](benchmark/scenario2__dt_1h_tend_1d_vs_1d_theta_1.05/plot_nodes.png)
 
-**Analysis:**  
+**Analysis:**
 As more MPI nodes are added, the runtime decreases because the workload is divided across more nodes. However, the speedup is not perfectly linear. We think this might be due to MPI communication or synchronization overhead as more nodes are used.
 
 ---
@@ -77,7 +78,7 @@ This shows how runtime changes with more OpenMP threads, using 4 MPI nodes and 3
 
 ![Runtime vs. OpenMP Threads](benchmark/scenario2__dt_1h_tend_1d_vs_1d_theta_1.05/plot_threads.png)
 
-**Analysis:**  
+**Analysis:**
 Runtime improves as more threads are added, especially up to about 32 threads. Beyond that, the gains slow down, likely due to hardware limitations (like core count) and the overhead of managing additional threads.
 
 ---
@@ -87,7 +88,7 @@ This compares runtime and accuracy (distance sum difference) as θ changes for a
 
 ![Runtime and Distance Sum Difference vs. θ](benchmark/scenario2__dt_1h_tend_1d_vs_1d_theta_1.05/plot_theta.png)
 
-**Analysis:**  
+**Analysis:**
 For each θ, the final positions of all bodies were summed component-wise at the last timestep and compared to the sum from the run with θ = 0.01 (the reference). Smaller θ values (< 0.5) are significantly slower because they use a stricter Barnes-Hut criterion, allowing fewer approximations. Larger θ values are faster due to more approximations. Interestingly, except for θ = 2.0, there was no difference in the summed positions—all other runs matched the reference exactly.
 
 ---
@@ -98,10 +99,10 @@ These diagrams provide a combined view of how both MPI node count and OpenMP thr
 ![Scenario 1](benchmark/plot____data_scenario1_csv_1h_1d_1d_1.05.png)
 ![Scenario 2](benchmark/plot____data_scenario2_csv_1h_1d_1d_1.05.png)
 
-**Analysis:**  
-We can see that the generally the times are decreasing with more nodes and threads. 
-However, it's not exactly linear. For scenario 1, we get fastest time using 4 nodes and just 8 threads. 
-For scenario 2, different combination give best times like using all 4 nodes, 2 nodes with 32 threads or single node using all threads, etc. Another observation is that as we increase the number of threads, the performance improvement from adding more nodes becomes less. 
+**Analysis:**
+We can see that the generally the times are decreasing with more nodes and threads.
+However, it's not exactly linear. For scenario 1, we get fastest time using 4 nodes and just 8 threads.
+For scenario 2, different combination give best times like using all 4 nodes, 2 nodes with 32 threads or single node using all threads, etc. Another observation is that as we increase the number of threads, the performance improvement from adding more nodes becomes less.
 
 ---
 
