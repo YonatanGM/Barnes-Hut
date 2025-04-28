@@ -12,8 +12,22 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
+option(ENABLE_COVERAGE
+       "Enable code coverage (forces Debug build)"
+       OFF)
+
+if(ENABLE_COVERAGE)
+    message(STATUS "Coverage enabled—forcing Debug + -g --coverage")
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
+    include(${CMAKE_SOURCE_DIR}/test/CodeCoverage.cmake)
+    APPEND_COVERAGE_COMPILER_FLAGS()
+endif()
+
+
+
+
 # Define the library
-set(LIBRARY_SOURCES 
+set(LIBRARY_SOURCES
     src/octree.cpp
     src/barnes_hut.cpp
     src/integration.cpp
