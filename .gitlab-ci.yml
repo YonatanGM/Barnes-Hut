@@ -11,7 +11,7 @@ variables:
 before_script:
   - export DEBIAN_FRONTEND=noninteractive
   - apt-get update -qq
-  - apt-get install -qq -y build-essential cmake libomp-dev libopenmpi-dev openmpi-bin git
+  - apt-get install -qq -y build-essential cmake libomp-dev libopenmpi-dev openmpi-bin git wget
   - wget -qO- https://github.com/linux-test-project/lcov/archive/refs/tags/v2.2.tar.gz | tar xz
   - cd lcov-2.2 && make install && cd ..
   - lcov --version
