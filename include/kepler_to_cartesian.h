@@ -12,11 +12,12 @@ struct OrbitalElements {
     double longOfAscNode;
     double meanAnomaly;
     double epoch;
+    double mu;   // gravitational parameter for this orbit
 };
 
 // structure representing a  body (using state vectors)
 struct Body {
-    int index;             // unique index of body 
+    int index;             // unique index of body
     double mass;        // mass of the body
     double x, y, z;     // position coordinates
     double vx, vy, vz;  // velocity components
@@ -24,7 +25,7 @@ struct Body {
     std::string name;   // name of the body
 };
 
-// Read 
+// Read
 // Convert orbital elements to Cartesian state vectors
 Body* convertKeplerToCartesian(const OrbitalElements& elem);
 
@@ -34,4 +35,4 @@ bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::st
 // Function to combine two CSV files into one, removing duplicates based on the "name" column
 void combineCSVFiles(const std::string& inputFile1, const std::string& inputFile2, const std::string& outputFile);
 
-#endif 
+#endif

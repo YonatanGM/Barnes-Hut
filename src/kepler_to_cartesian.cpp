@@ -6,18 +6,19 @@
 #include <cmath>
 #include <random>
 #include <unordered_map>
-#include <iomanip> 
+#include <iomanip>
 #include <unordered_set>
 
 // Convert orbital elements to Cartesian state vectors
 Body* convertKeplerToCartesian(const OrbitalElements& elem) {
-    
+
     // Constants
     const double G = 1.48812e-34; // Gravitational constant in AU^3 kg^-1 day^-2
     const double mass_sun = 1.98847e30;     // Mass of the Sun in kg
 
     // calculate mu (in AU and day)
-    double mu = G * mass_sun; // AU^3/day^2
+    // double mu = G * mass_sun; // AU^3/day^2
+    double mu = elem.mu;
     // Convert angles from degrees to radians if necessary
     // std::cout << "cKtoC: " << "mu = " <<  mu << std::endl;
     double inclination = elem.inclination;
@@ -25,13 +26,12 @@ Body* convertKeplerToCartesian(const OrbitalElements& elem) {
     double longOfAscNode = elem.longOfAscNode;
     double meanAnomaly = elem.meanAnomaly; // this assumes t0 = t1 do I need to fix this
 
-    // double desiredTime = 2451544.5; // Julian Date for J2000.0
-    // double deltaTime = desiredTime - elem.epoch; // Δt in days, elem.epoch is t0
-    // double meanMotion = sqrt(mu / pow(elem.semiMajorAxis, 3)); // Ensure a is in AU
-    // meanAnomaly += meanMotion * deltaTime;
-    // meanAnomaly = fmod(meanAnomaly, 2 * M_PI); // Normalize to [0, 2π]
-    // if (meanAnomaly < 0) meanAnomaly += 2 * M_PI;
-
+    double desiredTime = 2451544.5; // Julian Date for J2000.0
+    double deltaTime = desiredTime - elem.epoch; // Δt in days, elem.epoch is t0
+    double meanMotion = sqrt(mu / pow(elem.semiMajorAxis, 3)); // Ensure a is in AU
+    meanAnomaly += meanMotion * deltaTime;
+    meanAnomaly = fmod(meanAnomaly, 2 * M_PI); // Normalize to [0, 2π]
+    if (meanAnomaly < 0) meanAnomaly += 2 * M_PI;
 
     // Solve Kepler's Equation for Eccentric Anomaly (E)
     double E = meanAnomaly; // Initial guess
@@ -124,6 +124,9 @@ bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::st
         return false;
     }
 
+    // set precision in scientific notation
+    outputFile << std::setprecision(std::numeric_limits<double>::max_digits10);
+
     std::string line;
 
     // Read the header line
@@ -155,6 +158,9 @@ bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::st
     // }
 
     outputFile << "id,name,class,mass,pos_x,pos_y,pos_z,vel_x,vel_y,vel_z\n";
+
+    // keep track of Sun-centric state vectors for non-satellites
+    std::unordered_map<std::string, Body> centralBodies;
 
     // Random number generator for albedo approximation
     std::random_device rd;
@@ -192,6 +198,12 @@ bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::st
             continue; // Skip if `class` is missing
         }
 
+        // Determine central body (default to Sun if absent)
+        std::string centralBody = "Sun";
+        if (headerMap.count("central_body") && headerMap["central_body"] < tokens_size) {
+            centralBody = tokens[headerMap["central_body"]];
+        }
+
         // Extract or approximate `mass`
         if (headerMap.count("mass") && headerMap["mass"] < tokens_size  && !tokens[headerMap["mass"]].empty()) {
             mass = std::stod(tokens[headerMap["mass"]]);
@@ -204,7 +216,7 @@ bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::st
             std::cout << "Missing albedo for body: " << name << ". Approximating based on class...\n";
             std::uniform_real_distribution<> dis(0.1, 0.2); // Default range for unknown classes
 
-            if (classType == "AMO" || classType == "APO" || classType == "ATE" || classType == "IEO" || 
+            if (classType == "AMO" || classType == "APO" || classType == "ATE" || classType == "IEO" ||
                 classType == "MCA" || classType == "PAA" || classType == "HYA" || classType == "AST") {
                 dis = std::uniform_real_distribution<>(0.450, 0.550);
             } else if (classType == "IMB") {
@@ -234,7 +246,7 @@ bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::st
 
         // Extract or approximate `diameter`
         if (headerMap.count("diameter") && headerMap["diameter"] < tokens_size  && !tokens[headerMap["diameter"]].empty()) {
-            diameter = std::stod(tokens[headerMap["diameter"]]); //should be in km for asteroids 
+            diameter = std::stod(tokens[headerMap["diameter"]]); //should be in km for asteroids
         } else if (headerMap.count("H") && headerMap["H"] < tokens_size  && !tokens[headerMap["H"]].empty()) {
             double H = std::stod(tokens[headerMap["H"]]);
             diameter = 1329 * std::pow(albedo, -0.5) * std::pow(10, -0.2 * H); // in km
@@ -257,7 +269,10 @@ bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::st
             // Calculate mass using the formula: mass = (4/3) * π * r³ * ρ
             mass = (4.0 / 3.0) * M_PI * std::pow(radius, 3) * rho; // in kg
             // std::cout << "Approximated mass for body: " << name << " using diameter and density.\n";
-        } else {
+        }
+
+        // If mass is still zero
+        if (mass == 0.0) {
             std::cerr << "Mass could not be approximated for body: " << name
                     << ". Check if diameter and other properties are valid.\n";
         }
@@ -284,11 +299,30 @@ bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::st
             continue; // Skip if essential orbital elements are missing
         }
 
+        // for calculating mu, if it's moon and we have its central body, use the it's central body's mass,
+        // otherwise use Sun's mass
+        const double G = 1.48812e-34; // Gravitational constant in AU^3 kg^-1 day^-2
+        const double mass_sun = 1.98847e30;     // Mass of the Sun in kg
+        double mu = (classType == "SAT" && centralBodies.count(centralBody))
+                    ? G * centralBodies[centralBody].mass
+                    : G * mass_sun;
+        elem.mu = mu;
+
         // Convert orbital elements to Cartesian state vectors
         Body* body = convertKeplerToCartesian(elem);
 
+        // If this is a moon, translate by its central body's state
+        if (classType == "SAT" && centralBodies.count(centralBody)) {
+            Body& parent = centralBodies[centralBody];
+            body->x  += parent.x;
+            body->y  += parent.y;
+            body->z  += parent.z;
+            body->vx += parent.vx;
+            body->vy += parent.vy;
+            body->vz += parent.vz;
+        }
         // Write state vectors to the output file
-        outputFile << id << "," 
+        outputFile << id << ","
                    << name << ","    // name (can be empty string if missing)
                    << classType << "," // class
                    << mass << "," // mass
@@ -299,7 +333,14 @@ bool convertOrbitalElementsToCSV(const std::string& inputFilename, const std::st
                    << body->vy << ","   // vel_y
                    << body->vz << "\n"; // vel_z
 
-        // Clean up the dynamically allocated body
+        // If planet or dwarf planet, store the body for translating it's moons later,
+        // we assume the planets and dwarf planets come first in the csv
+        // so we should have a proper map before getting to the moons
+        body->mass = mass;
+        if (classType == "PLA" || classType == "DWA") {
+            centralBodies[name] = *body;    // copy the Body into the map
+        }
+
         id++;
         delete body;
     }
@@ -332,6 +373,10 @@ void combineCSVFiles(const std::string& inputFile1, const std::string& inputFile
         std::cerr << "Error: File 1 is empty or invalid!" << std::endl;
         return;
     }
+
+    // insert Sun as the first entry
+    uniqueNames.insert("Sun");
+    output << currentID++ << ",Sun,STA,1.988469999999999977e+30,0,0,0,0,0,0\n";
 
     // Helper function to process a file
     auto processFile = [&](std::ifstream& file) {
