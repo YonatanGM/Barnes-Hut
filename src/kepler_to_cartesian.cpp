@@ -12,10 +12,6 @@
 // Convert orbital elements to Cartesian state vectors
 Body* convertKeplerToCartesian(const OrbitalElements& elem) {
 
-    // Constants
-    const double G = 1.48812e-34; // Gravitational constant in AU^3 kg^-1 day^-2
-    const double mass_sun = 1.98847e30;     // Mass of the Sun in kg
-
     // calculate mu (in AU and day)
     // double mu = G * mass_sun; // AU^3/day^2
     double mu = elem.mu;
