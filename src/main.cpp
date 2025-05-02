@@ -59,7 +59,7 @@ int main(int argc, char* argv[]) {
     std::string vs_str;
     int body_count = -1; // use all bodies if not provided
 
-    bool is_reference;
+    bool is_reference=false;
     std::string ref_dir;
     double summed_dist_error = 0.0; // accumulated error
 
