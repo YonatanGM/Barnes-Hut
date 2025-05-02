@@ -13,7 +13,7 @@
 set -e
 set -x
 # Default Parameters
-file=${1:-"../data/scenario2_306051.csv"}
+file=${1:-"../data/state_vectors_csvs/scenario2_300149.csv"}
 dt=${2:-"1h"}
 t_end=${3:-"5d"}
 vs=${4:-"2h"}
