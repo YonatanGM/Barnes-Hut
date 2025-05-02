@@ -7,8 +7,7 @@ build/
 debug/
 release/
 benchmark/
-build-cov/
-test0/
+
 *.cmake
 !CodeCoverage.cmake
 # Prerequisites
