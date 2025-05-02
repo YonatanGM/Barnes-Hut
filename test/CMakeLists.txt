@@ -41,22 +41,25 @@ add_executable(test_barnes_hut test_barnes_hut.cpp ../src/barnes_hut.cpp ../src/
 target_link_libraries(test_barnes_hut PRIVATE solar_system_lib gtest gtest_main)
 add_test(NAME test_barnes_hut COMMAND test_barnes_hut)
 
-setup_target_for_coverage_lcov(
-    NAME coverage
-    EXECUTABLE ctest --output-on-failure || true
-    DEPENDENCIES
-        test_parse_time
-        test_io
-        test_integration
-        test_octree
-        test_barnes_hut
 
-    LCOV_ARGS "--ignore-errors" "inconsistent,unused,mismatch"
+if(ENABLE_COVERAGE)
+  setup_target_for_coverage_lcov(
+      NAME coverage
+      EXECUTABLE ctest --output-on-failure || true
+      DEPENDENCIES
+          test_parse_time
+          test_io
+          test_integration
+          test_octree
+          test_barnes_hut
 
-    EXCLUDE
-      "${CMAKE_BINARY_DIR}/*"  # Exclude build directory
-      "${CMAKE_BINARY_DIR}/_deps/*"  # Exclude _deps directory
-      "/usr/*"                        # Exclude system headers
-      "${CMAKE_SOURCE_DIR}/test/*"
-      "${CMAKE_SOURCE_DIR}/include/*"  # exclude include directory
-)
+      LCOV_ARGS "--ignore-errors" "inconsistent,unused,mismatch"
+
+      EXCLUDE
+        "${CMAKE_BINARY_DIR}/*"  # Exclude build directory
+        "${CMAKE_BINARY_DIR}/_deps/*"  # Exclude _deps directory
+        "/usr/*"                        # Exclude system headers
+        "${CMAKE_SOURCE_DIR}/test/*"
+        "${CMAKE_SOURCE_DIR}/include/*"  # exclude include directory
+  )
+endif()
