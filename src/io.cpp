@@ -442,54 +442,37 @@ void updatePVDFile(const std::string &pvdFilename,
     }
 }
 
-// Write CSV for a single timestep’s positions.
-void saveReferenceStepCSV(const std::string& dir,
-                          int step,
-                          const std::vector<Position>& pos) {
-    std::ostringstream fn;
-    fn << dir << "/ref_step_" << std::setw(5) << std::setfill('0')
-       << step << ".csv";
-    std::ofstream os(fn.str());
+// Save final positions to CSV for the reference run (groundtruth)
+void saveReferenceCSV(const std::string& dir, const std::vector<Position>& pos) {
+    std::ofstream os(dir + "/final_ref.csv");
     os << "id,x,y,z\n";
-    for (int i = 0; i < (int)pos.size(); ++i) {
-        os << i << ","
-           << pos[i].x << "," << pos[i].y << "," << pos[i].z << "\n";
+    for (int i = 0; i < static_cast<int>(pos.size()); ++i) {
+        os << i << "," << pos[i].x << "," << pos[i].y << "," << pos[i].z << "\n";
     }
 }
 
-// Load exactly the CSV back into a vector<Position>
-std::vector<Position>
-loadReferenceStepCSV(const std::string& dir,
-                     int step,
-                     int num_bodies) {
-    // build the filename
-    std::ostringstream fn;
-    fn << dir << "/ref_step_"
-       << std::setw(5) << std::setfill('0') << step
-       << ".csv";
-    const std::string path = fn.str();
-
-    // try to open
-    std::ifstream is(path);
+// Load final reference positions from CSV
+std::vector<Position> loadReferenceCSV(const std::string& dir, int num_bodies) {
+    std::ifstream is(dir + "/final_ref.csv");
     if (!is.is_open()) {
-        // either file doesn't exist, or permission denied, etc.
-        throw std::runtime_error("could not open reference CSV: " + path);
+        throw std::runtime_error("could not open reference CSV.");
     }
 
-    // now we're safe to read header + data
     std::string line;
-    std::getline(is, line);  // skip header
+    std::getline(is, line); // skip header
 
     std::vector<Position> pos(num_bodies);
     while (std::getline(is, line)) {
         std::istringstream ss(line);
         int id; char comma;
-        double x,y,z;
+        double x, y, z;
         ss >> id >> comma >> x >> comma >> y >> comma >> z;
-        pos[id] = {x,y,z};
+        pos[id] = {x, y, z};
     }
     return pos;
 }
+
+
 
 // Sum Euclidean distance between corresponding points in a and b
 double computeDistanceSum(const std::vector<Position>& a,

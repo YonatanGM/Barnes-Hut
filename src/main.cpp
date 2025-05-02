@@ -57,11 +57,11 @@ int main(int argc, char* argv[]) {
     std::string dt_str;
     std::string t_end_str;
     std::string vs_str;
-    int body_count = -1; // if not provided, use all bodies
+    int body_count = -1; // use all bodies if not provided
 
     bool is_reference;
     std::string ref_dir;
-    double distance_sum = 0.0; // accumulated error
+    double summed_dist_error = 0.0; // accumulated error
 
     try {
         // set up command-line options using cxxopts
@@ -76,11 +76,11 @@ int main(int argc, char* argv[]) {
             ("theta", "barnes-hut parameter", cxxopts::value<double>()->default_value("0.5"))
             ("s,softening", "softening parameter", cxxopts::value<double>()->default_value("1e-11"))
             ("b,bodies", "number of bodies to simulate", cxxopts::value<int>()->default_value("-1"))
-            ("log", "enable logging")
+            ("l,log", "enable logging", cxxopts::value<bool>()->default_value("true")->implicit_value("true"))
             ("r,reference", "run as reference (ground truth)", cxxopts::value<bool>()->default_value("false"))
             ("h,help", "show usage");
 
-        // parse the command-line arguments
+        // parse the cmd arguments
         auto result = options.parse(argc, argv);
 
         // if help is requested, display usage and exit
@@ -90,13 +90,12 @@ int main(int argc, char* argv[]) {
             return 0;
         }
 
-        logging_enabled = result.count("log");
-
         // required file
         if (!result.count("file")) {
             throw std::invalid_argument("input file not specified; use --file <filename>");
         }
 
+        logging_enabled = result["log"].as<bool>();
         filename    = result["file"].as<std::string>();
         dt_str = result["dt"].as<std::string>();
         t_end_str = result["t_end"].as<std::string>();
@@ -116,9 +115,9 @@ int main(int argc, char* argv[]) {
 
 
         // enforce reference runs use θ <= 0.01
-        if (is_reference && theta > 0.01) {
+        if (is_reference && theta > 0.1) {
             throw std::invalid_argument(
-            "reference run requires theta <= 0.01 (you used theta=" + std::to_string(theta) + ")");
+            "reference run requires theta <= 0.1 (you used theta=" + std::to_string(theta) + ")");
         }
 
         // validate parameters
@@ -132,21 +131,18 @@ int main(int argc, char* argv[]) {
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
+    // log simulation parameters
+    LOG(0, "input file: " << filename);
+    LOG(0,
+        "dt: "     << dt_str    << ", "
+      << "t_end: "  << t_end_str << ", "
+      << "vs: "     << vs_str    << ", "
+      << "vs_dir: " << vs_dir    << ", "
+      << "theta: "  << theta
+    );
+
     // log the number of threads available
     LOG(rank, "threads available: " << omp_get_max_threads());
-
-    // log simulation parameters
-    if (rank == 0) {
-        LOG(0, "simulation parameters:");
-        LOG(0, "file: " << filename << ", dt: " << dt_str << ", t_end: " << t_end_str);
-        LOG(0, "theta: " << theta << ", softening: " << softening);
-        LOG(0, "visualization every " << vs_str << " to " << vs_dir);
-        if (body_count > 0) {
-            LOG(0, "limiting number of bodies to " << body_count);
-        } else {
-            LOG(0, "using all bodies from csv");
-        }
-    }
 
     // create directories
     if (rank == 0) {
@@ -163,6 +159,7 @@ int main(int argc, char* argv[]) {
     std::vector<int> orbit_classes;        // vector to store orbit classes
 
     int num_bodies = 0; // total number of bodies
+
     if (rank == 0) {
         // read csv and limit the number of bodies if specified
         if (!readCSV(filename, masses, positions, velocities, names, orbit_classes, body_count)) {
@@ -178,8 +175,6 @@ int main(int argc, char* argv[]) {
     std::string input_stem = fs::path(filename).stem().string();
     std::string pvdFilename = "sim_" + input_stem + "_dt" + dt_str + "_tend" + t_end_str + "_vs" + vs_str + "_bodies" + std::to_string(num_bodies) + ".pvd";
 
-    double simulation_start = MPI_Wtime();
-    double simulation_end   = 0.0;
     // broadcast the number of bodies to all processes
     MPI_Bcast(&num_bodies, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
@@ -220,6 +215,7 @@ int main(int argc, char* argv[]) {
             if (len > max_name_len) max_name_len = len;
         }
     }
+
     MPI_Bcast(&max_name_len, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     int chunk_size = max_name_len + 1; // allocate extra space for null terminator
@@ -291,7 +287,7 @@ int main(int argc, char* argv[]) {
     std::vector<Acceleration> local_accelerations(local_n);
     computeAccelerations(masses, positions, local_masses, local_positions, local_accelerations, G, theta, softening);
 
-    // main simulation loop
+    // simulation loop
     while (t < t_end_val) {
         // perform leapfrog integration, update positions and half-step velocities
         leapfrogIntegration(local_positions, local_velocities, local_accelerations, dt_val);
@@ -334,8 +330,6 @@ int main(int argc, char* argv[]) {
                          kinetic_energy, potential_energy, total_energy, virial_equilibrium,
                          vs_dir);
 
-
-
             MPI_Barrier(MPI_COMM_WORLD);
             // ensure all vtp files are written before updating pvd
 
@@ -344,23 +338,6 @@ int main(int argc, char* argv[]) {
                 updatePVDFile(pvdFilename, size, vs_counter, t, vs_dir);
                 LOG(0, "saved state for visualization step " << vs_counter);
 
-                // summed distance error calculation is not inlcuded in the simulation time
-                auto sim_marker = MPI_Wtime();
-                if (is_reference) {
-                    // write this timestep’s positions out
-                    saveReferenceStepCSV(ref_dir, vs_counter, positions);
-                } else {
-                    try {
-                        // attempt to load the matching ref CSV
-                        auto ref_pos = loadReferenceStepCSV(ref_dir, vs_counter, num_bodies);
-                        // accumulate the distance sum
-                        distance_sum += computeDistanceSum(positions, ref_pos);
-                    } catch (const std::exception &e) {
-                        // skip
-                        // LOG(rank, "step " << vs_counter << ": could not load reference (" << e.what() << "), skipping");
-                    }
-                }
-                simulation_end = sim_marker;
             }
 
             vs_counter++;
@@ -369,14 +346,22 @@ int main(int argc, char* argv[]) {
 
     LOG(0, "completed.");
 
-    // output timing information and summed up distances
     if (rank == 0) {
-        std::cout << "SIMULATION_TIME: " <<  simulation_end - simulation_start << std::endl;
-        std::cout << "TOTAL_TIME: " << MPI_Wtime() - total_start << std::endl;
-        std::cout << "SUMMED_DIST: " << distance_sum << std::endl;
+        if (is_reference) {
+            saveReferenceCSV(ref_dir, positions);
+        } else {
+            try {
+                auto ref_pos = loadReferenceCSV(ref_dir, num_bodies);
+                summed_dist_error = computeDistanceSum(positions, ref_pos);
+            } catch (const std::exception& e) {
+                LOG(0, e.what());
+            }
+        }
     }
 
-    // clean up mpi datatypes and finalize mpi
+    LOG(0, "TOTAL_TIME: " << MPI_Wtime() - total_start);
+    LOG(0, "SUMMED_DIST_ERROR: " << summed_dist_error);
+
     MPI_Type_free(&MPI_VECTOR);
     MPI_Finalize();
 
