@@ -15,8 +15,8 @@ set -x
 # Default Parameters
 file=${1:-"../data/scenario2_306051.csv"}
 dt=${2:-"1h"}
-t_end=${3:-"1d"}
-vs=${4:-"1h"}
+t_end=${3:-"5d"}
+vs=${4:-"2h"}
 theta=${5:-"1.05"}
 
 # Setup Benchmark Directory
@@ -46,10 +46,10 @@ echo "threads nodes total_time" > "$data_nodes_file"
 echo "theta total_time summed_dist_error" > "$data_theta_file"
 
 # Parameter Ranges
-body_counts=(1000 10000 25000 50000 100000)
+body_counts=(1000 10000 25000 50000 100000 300000)
 node_counts=(1 2 3 4)
 thread_counts=(2 8 16 32 48)
-theta_values=(0.1 0.5 1.05 1.2 1.5 2.0)
+theta_values=(0.01 0.1 0.5 1.05 1.2 1.5 2.0)
 
 # Build Directory and Simulation Binary
 BUILD_DIR="./build"
@@ -93,7 +93,7 @@ run_simulation() {
     # build the command array
     # mpirun -np, srun --exclusive -N
     # build the command array
-    local cmd=(mpirun -np "$nodes" "$simulate_binary"
+    local cmd=(srun --exclusive -N "$nodes" "$simulate_binary"
                 --file "$file"
                 --dt   "$dt"
                 --t_end "$t_end"
@@ -124,7 +124,7 @@ run_simulation() {
 fixed_nodes=4
 fixed_threads=32
 fixed_theta=1.05
-fixed_bodies=5000  # Adjust as needed
+fixed_bodies=300000 # Adjust as needed
 
 echo "Starting Phase 1: Runtime vs. Number of Bodies"
 for bodies in "${body_counts[@]}"; do
