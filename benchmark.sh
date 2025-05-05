@@ -5,7 +5,7 @@
 #SBATCH --job-name="nbody_sim"
 #SBATCH --output=job_output.out
 #SBATCH --error=job_error.err
-#SBATCH --time=02:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --nodes=4
 #SBATCH --exclusive
 
@@ -15,8 +15,8 @@ set -x
 # Default Parameters
 file=${1:-"../data/state_vectors_csvs/scenario2_300149.csv"}
 dt=${2:-"1h"}
-t_end=${3:-"5d"}
-vs=${4:-"2h"}
+t_end=${3:-"20d"}
+vs=${4:-"12h"}
 theta=${5:-"1.05"}
 
 # Setup Benchmark Directory
@@ -46,10 +46,10 @@ echo "threads nodes total_time" > "$data_nodes_file"
 echo "theta total_time summed_dist_error" > "$data_theta_file"
 
 # Parameter Ranges
-body_counts=(1000 10000 25000 50000 100000 300000)
+body_counts=(1000 10000 25000 50000 100000 200000)
 node_counts=(1 2 3 4)
-thread_counts=(2 8 16 32 48)
-theta_values=(0.01 0.1 0.5 1.05 1.2 1.5 2.0)
+thread_counts=(1 2 4 8 12 24 48 96)
+theta_values=(0.1 0.3 0.5 0.7 1.0 1.2 1.5 2.0)
 
 # Build Directory and Simulation Binary
 BUILD_DIR="./build"
@@ -122,9 +122,9 @@ run_simulation() {
 # Phase 1: Runtime vs. Number of Bodies
 # =======================
 fixed_nodes=4
-fixed_threads=32
+fixed_threads=48
 fixed_theta=1.05
-fixed_bodies=300000 # Adjust as needed
+fixed_bodies=100000 # Adjust as needed
 
 echo "Starting Phase 1: Runtime vs. Number of Bodies"
 for bodies in "${body_counts[@]}"; do
