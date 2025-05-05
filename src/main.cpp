@@ -276,7 +276,7 @@ int main(int argc, char* argv[]) {
     MPI_Scatterv(orbit_classes.data(), sendcounts.data(), displs.data(), MPI_INT,
                  local_orbit_classes.data(), local_n, MPI_INT, 0, MPI_COMM_WORLD);
 
-    LOG(rank, "process " << rank << " received " << local_n << " bodies starting at index " << displs[rank]);
+    LOG(rank, "received " << local_n << " bodies starting at index " << displs[rank]);
 
 
     double t = 0.0;      // current simulation time in days
