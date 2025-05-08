@@ -10,7 +10,7 @@
 
 set -e
 set -x
-export OMP_NUM_THREADS=8
+# export OMP_NUM_THREADS=8
 
 echo "Running scenario 2 only... at $(date)"
 srun --exclusive -N 4 ./build/simulate --file ./data/state_vectors_csvs/scenario2_300149.csv --dt 1h --t_end 1y --vs 7d --vs_dir sim_s2 --theta 1.05 --bodies 300000
