@@ -2,9 +2,9 @@
 
 #SBATCH --partition=all
 #SBATCH --nodelist=simcl1n[1-4]
-#SBATCH --job-name="nbody_sim"
-#SBATCH --output=job_output.out
-#SBATCH --error=job_error.err
+#SBATCH --job-name="benchmark_S2"
+#SBATCH --output=benchmark_S2.out
+#SBATCH --error=benchmark_S2.err
 #SBATCH --time=2-00:00:00
 #SBATCH --nodes=4
 #SBATCH --exclusive
@@ -15,14 +15,14 @@ set -x
 # Default Parameters
 file=${1:-"../data/state_vectors_csvs/scenario2_300149.csv"}
 dt=${2:-"1h"}
-t_end=${3:-"20d"}
+t_end=${3:-"10d"}
 vs=${4:-"12h"}
 theta=${5:-"1.05"}
 
 # Setup Benchmark Directory
 sanitized_file=$(basename "$file" .csv | tr -c 'A-Za-z0-9' '_')
 timestamp=$(date +%Y%m%d_%H%M%S)
-benchmark_dir="benchmark/${sanitized_file}_dt_${dt}_tend_${t_end}_vs_${vs}_theta_${theta}"
+benchmark_dir="benchmark_S2_0/${sanitized_file}_dt_${dt}_tend_${t_end}_vs_${vs}_theta_${theta}"
 mkdir -p "$benchmark_dir/vs_outputs"
 
 # Data and Plot Files
@@ -93,7 +93,7 @@ run_simulation() {
     # build the command array
     # mpirun -np, srun --exclusive -N
     # build the command array
-    local cmd=(srun --exclusive -N "$nodes" "$simulate_binary"
+    local cmd=(srun --exclusive -N "$nodes" -c "$threads" --cpu-bind=cores "$simulate_binary"
                 --file "$file"
                 --dt   "$dt"
                 --t_end "$t_end"
@@ -101,6 +101,7 @@ run_simulation() {
                 --vs_dir "${OLDPWD}/${benchmark_dir}/vs_outputs"
                 --theta "$current_theta"
                 --bodies "$bodies")
+
     if [ "$is_ref" = "true" ]; then
         cmd+=( -r )
     fi
@@ -137,11 +138,12 @@ echo "Phase 1 completed."
 # =======================
 # Phase 2: Runtime vs. OpenMP Threads
 # =======================
+fixed_nodes_for_threads=1
 echo "Starting Phase 2: Runtime vs. OpenMP Threads"
 for threads in "${thread_counts[@]}"; do
-    metrics=$(run_simulation "$fixed_bodies" "$fixed_nodes" "$threads" "$fixed_theta")
+    metrics=$(run_simulation "$fixed_bodies" "$fixed_nodes_for_threads" "$threads" "$fixed_theta")
     total_time=$(echo "$metrics" | awk '{print $1}')
-    echo "$fixed_nodes $threads $total_time" >> "${OLDPWD}/${data_threads_file}"
+    echo "$fixed_nodes_for_threads $threads $total_time" >> "${OLDPWD}/${data_threads_file}"
 done
 echo "Phase 2 completed."
 
