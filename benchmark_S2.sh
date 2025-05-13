@@ -23,7 +23,8 @@ theta=${5:-"1.05"}
 # Setup Benchmark Directory
 sanitized_file=$(basename "$file" .csv | tr -c 'A-Za-z0-9' '_')
 timestamp=$(date +%Y%m%d_%H%M%S)
-benchmark_dir="benchmark_S2_0/${sanitized_file}_dt_${dt}_tend_${t_end}_vs_${vs}_theta_${theta}"
+# unique per sbatch submission
+benchmark_dir="benchmark_S1_${SLURM_JOB_ID}/${sanitized_file}_dt_${dt}_tend_${t_end}_vs_${vs}_theta_${theta}"
 mkdir -p "$benchmark_dir/vs_outputs"
 
 # Data and Plot Files
