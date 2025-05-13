@@ -2,8 +2,8 @@
 #SBATCH --partition=all
 #SBATCH --nodelist=simcl1n[1-4]
 #SBATCH --job-name="scenario1_final"
-#SBATCH --output=scenario1_output.out
-#SBATCH --error=scenario1_error.err
+#SBATCH --output=scenario1.out
+#SBATCH --error=scenario1.err
 #SBATCH --time=06:30:00
 
 #SBATCH --nodes=4
