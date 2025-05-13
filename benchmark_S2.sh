@@ -1,211 +1,133 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 #SBATCH --partition=all
 #SBATCH --nodelist=simcl1n[1-4]
-#SBATCH --job-name="benchmark_S2"
+#SBATCH --job-name=benchmark_S2
 #SBATCH --output=benchmark_S2.out
 #SBATCH --error=benchmark_S2.err
 #SBATCH --time=2-00:00:00
 #SBATCH --nodes=4
 #SBATCH --exclusive
-#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks-per-node=1        # one MPI rank per node
 
-# Exit immediately if a command exits with a non-zero status
-set -e
+set -euo pipefail
 set -x
-# Default Parameters
+
+# ---------- user-tunable defaults -------------------------------------------
 file=${1:-"../data/state_vectors_csvs/scenario2_300149.csv"}
 dt=${2:-"1h"}
 t_end=${3:-"10d"}
 vs=${4:-"12h"}
 theta=${5:-"1.05"}
 
-# Setup Benchmark Directory
+# ---------- bookkeeping ------------------------------------------------------
 sanitized_file=$(basename "$file" .csv | tr -c 'A-Za-z0-9' '_')
 timestamp=$(date +%Y%m%d_%H%M%S)
 benchmark_dir="benchmark_S2_0/${sanitized_file}_dt_${dt}_tend_${t_end}_vs_${vs}_theta_${theta}"
-mkdir -p "$benchmark_dir/vs_outputs"
+mkdir -p "${benchmark_dir}/vs_outputs"
 
-# Data and Plot Files
 data_bodies_file="${benchmark_dir}/data_bodies.dat"
-plot_bodies_file="${benchmark_dir}/plot_bodies.png"
-
 data_threads_file="${benchmark_dir}/data_threads.dat"
-plot_threads_file="${benchmark_dir}/plot_threads.png"
-
 data_nodes_file="${benchmark_dir}/data_nodes.dat"
-plot_nodes_file="${benchmark_dir}/plot_nodes.png"
-
 data_theta_file="${benchmark_dir}/data_theta.dat"
+
+plot_bodies_file="${benchmark_dir}/plot_bodies.png"
+plot_threads_file="${benchmark_dir}/plot_threads.png"
+plot_nodes_file="${benchmark_dir}/plot_nodes.png"
 plot_theta_file="${benchmark_dir}/plot_theta.png"
 
-# Initialize data files with headers
-echo "bodies nodes threads total_time" > "$data_bodies_file"
-echo "nodes threads total_time" > "$data_threads_file"
-echo "threads nodes total_time" > "$data_nodes_file"
-# θ-data now holds total_time and summed_dist_error
-echo "theta total_time summed_dist_error" > "$data_theta_file"
+echo "bodies nodes threads total_time"       >  "$data_bodies_file"
+echo "nodes threads total_time"              >  "$data_threads_file"
+echo "threads nodes total_time"              >  "$data_nodes_file"
+echo "theta total_time summed_dist_error"    >  "$data_theta_file"
 
-# Parameter Ranges
+# ---------- sweep parameters -------------------------------------------------
 body_counts=(1000 10000 25000 50000 100000 200000)
 node_counts=(1 2 3 4)
 thread_counts=(1 2 4 8 12 24 48 96)
 theta_values=(0.1 0.3 0.5 0.7 1.0 1.2 1.5 2.0)
 
-# Build Directory and Simulation Binary
+# ---------- build & binary ---------------------------------------------------
 BUILD_DIR="./build"
-if [ ! -d "$BUILD_DIR" ]; then
+if [[ ! -d $BUILD_DIR ]]; then
     mkdir -p "$BUILD_DIR"
-    # Optionally, compile the simulation binary here
-    # e.g., make -C "$BUILD_DIR"
 fi
-
 cd "$BUILD_DIR"
 
-simulate_binary="./simulate"
+simulate_binary=./simulate
+[[ -x $simulate_binary ]] || { echo "simulate binary missing"; exit 1; }
 
-# Check if the simulation binary exists and is executable
-if [ ! -x "$simulate_binary" ]; then
-    echo "Error: Simulation binary '$simulate_binary' not found or not executable."
-    exit 1
-fi
-
-# Function to Run Simulation
-# Arguments:
-#   1. bodies
-#   2. nodes
-#   3. threads
-#   4. theta
-#   5. is_reference, default "false"
-# Returns:
-#   total_time summed_dist_error
-run_simulation() {
-    local bodies=$1
-    local nodes=$2
-    local threads=$3
-    local current_theta=$4
+# ---------- helper -----------------------------------------------------------
+run_simulation () {
+    local bodies=$1  nodes=$2  threads=$3  theta_now=$4
     local is_ref=${5:-false}
 
     export OMP_NUM_THREADS=$threads
-    # # Run the simulation and capture output
-    # simulation_output=$(srun --exclusive -N "$nodes" "$simulate_binary" \
-    #     --file "$file" --dt "$dt" --t_end "$t_end" --vs "$vs" \
-    #     --vs_dir "${OLDPWD}/${benchmark_dir}/vs_outputs" --theta "$current_theta" --bodies "$bodies" --log 2>&1)
-    # build the command array
-    # mpirun -np, srun --exclusive -N
-    # build the command array
-    local cmd=(srun --exclusive -N "$nodes" -c "$threads" --cpu-bind=cores "$simulate_binary"
-                --file "$file"
-                --dt   "$dt"
-                --t_end "$t_end"
-                --vs   "$vs"
-                --vs_dir "${OLDPWD}/${benchmark_dir}/vs_outputs"
-                --theta "$current_theta"
-                --bodies "$bodies")
+    local tmp_out
+    tmp_out=$(mktemp "sim_${bodies}_${threads}.XXXX")
 
-    if [ "$is_ref" = "true" ]; then
-        cmd+=( -r )
-    fi
+    srun --exclusive -N "$nodes" \
+         --cpus-per-task="$threads" \
+         "$simulate_binary" \
+         --file  "$file" \
+         --dt    "$dt" \
+         --t_end "$t_end" \
+         --vs    "$vs" \
+         --vs_dir "${OLDPWD}/${benchmark_dir}/vs_outputs" \
+         --theta "$theta_now" \
+         --bodies "$bodies" \
+         ${is_ref:+-r} 2>&1 | tee "$tmp_out"
 
-    simulation_output=$("${cmd[@]}" 2>&1)
+    local total_time summed_dist
+    total_time=$(grep    "TOTAL_TIME"         "$tmp_out" | awk '{print $4}')
+    summed_dist=$(grep   "SUMMED_DIST_ERROR"  "$tmp_out" | awk '{print $4}')
+    rm -f "$tmp_out"
 
-    # Extract TOTAL_TIME and SUMMED_DIST_ERROR components
-    total_time=$(echo "$simulation_output" | grep "TOTAL_TIME" | awk '{print $4}')
-    summed_dist_error=$(echo "$simulation_output" | grep "SUMMED_DIST_ERROR" | awk '{print $4}')
-
-    # fallback to "na" if missing
-    total_time=${total_time:-na}
-    summed_dist_error=${summed_dist_error:-na}
-
-    echo "$total_time $summed_dist_error"
+    echo "${total_time:-na} ${summed_dist:-na}"
 }
 
-# =======================
-# Phase 1: Runtime vs. Number of Bodies
-# =======================
+# ---------- Phase 1 – bodies -------------------------------------------------
 fixed_nodes=4
 fixed_threads=48
 fixed_theta=1.05
-fixed_bodies=100000 # Adjust as needed
+fixed_bodies=100000   # for later phases
 
-echo "Starting Phase 1: Runtime vs. Number of Bodies"
-for bodies in "${body_counts[@]}"; do
-    metrics=$(run_simulation "$bodies" "$fixed_nodes" "$fixed_threads" "$fixed_theta")
-    total_time=$(echo "$metrics" | awk '{print $1}')
-    echo "$bodies $fixed_nodes $fixed_threads $total_time" >> "${OLDPWD}/${data_bodies_file}"
+for b in "${body_counts[@]}"; do
+    read -r t _ < <(run_simulation "$b" "$fixed_nodes" "$fixed_threads" "$fixed_theta")
+    echo "$b $fixed_nodes $fixed_threads $t" >> "${OLDPWD}/${data_bodies_file}"
 done
-echo "Phase 1 completed."
 
-# =======================
-# Phase 2: Runtime vs. OpenMP Threads
-# =======================
-fixed_nodes_for_threads=1
-echo "Starting Phase 2: Runtime vs. OpenMP Threads"
-for threads in "${thread_counts[@]}"; do
-    metrics=$(run_simulation "$fixed_bodies" "$fixed_nodes_for_threads" "$threads" "$fixed_theta")
-    total_time=$(echo "$metrics" | awk '{print $1}')
-    echo "$fixed_nodes_for_threads $threads $total_time" >> "${OLDPWD}/${data_threads_file}"
+# ---------- Phase 2 – threads ------------------------------------------------
+fixed_nodes_thr=1
+for th in "${thread_counts[@]}"; do
+    read -r t _ < <(run_simulation "$fixed_bodies" "$fixed_nodes_thr" "$th" "$fixed_theta")
+    echo "$fixed_nodes_thr $th $t" >> "${OLDPWD}/${data_threads_file}"
 done
-echo "Phase 2 completed."
 
-# =======================
-# Phase 3: Runtime vs. MPI Nodes
-# =======================
-echo "Starting Phase 3: Runtime vs. MPI Nodes"
-for nodes in "${node_counts[@]}"; do
-    metrics=$(run_simulation "$fixed_bodies" "$nodes" "$fixed_threads" "$fixed_theta")
-    total_time=$(echo "$metrics" | awk '{print $1}')
-    echo "$fixed_threads $nodes $total_time" >> "${OLDPWD}/${data_nodes_file}"
+# ---------- Phase 3 – nodes --------------------------------------------------
+for n in "${node_counts[@]}"; do
+    read -r t _ < <(run_simulation "$fixed_bodies" "$n" "$fixed_threads" "$fixed_theta")
+    echo "$fixed_threads $n $t" >> "${OLDPWD}/${data_nodes_file}"
 done
-echo "Phase 3 completed."
 
-# =======================
-# Phase 4: Runtime and Distance Sum vs. Theta
-# =======================
-echo "Starting Phase 4: Runtime and Distance Sum vs. Theta"
-
-# Sort theta_values in ascending order to identify the smallest theta
+# ---------- Phase 4 – theta --------------------------------------------------
 sorted_theta_values=($(printf "%s\n" "${theta_values[@]}" | sort -n))
-
-# Extract the smallest theta as the reference
 reference_theta=${sorted_theta_values[0]}
-echo "Reference theta: $reference_theta"
 
-# Run the reference simulation *with* the -r flag
-metrics_ref=$(run_simulation \
-    "$fixed_bodies" "$fixed_nodes" "$fixed_threads" \
-    "$reference_theta" "true")
+read -r t_ref _ < <(run_simulation "$fixed_bodies" "$fixed_nodes" \
+                    "$fixed_threads" "$reference_theta" true)
+echo "$reference_theta $t_ref 0" >> "${OLDPWD}/${data_theta_file}"
 
-# parse out the two fields
-total_time_ref=$(echo "$metrics_ref" | awk '{print $1}')
-dist_ref=$(echo "$metrics_ref" | awk '{print $2}')
-
-# Validate reference metrics
-if [ "$total_time_ref" = "na" ] || [ "$dist_ref" = "na" ]; then
-    echo "Error: Missing metrics in reference run with Theta: $reference_theta. Aborting."
-    exit 1
-fi
-
-echo "Reference run completed: Theta=$reference_theta, TOTAL_TIME=$total_time_ref, SUMMED_DIST_ERROR=$dist_ref"
-
-# Record reference metrics (error = 0 by definition)
-echo "$reference_theta $total_time_ref 0" >> "${OLDPWD}/${data_theta_file}"
-
-# Now loop the other thetas
-for current_theta in "${sorted_theta_values[@]:1}"; do
-    echo "Running θ = $current_theta …"
-    metrics=$(run_simulation \
-        "$fixed_bodies" "$fixed_nodes" "$fixed_threads" \
-        "$current_theta" "false")
-
-    tot_time=$(echo "$metrics" | awk '{print $1}')
-    dist=$(echo "$metrics" | awk '{print $2}')
-
-    echo "θ=$current_theta, TOTAL_TIME=$tot_time, SUMMED_DIST_ERROR=$dist"
-    echo "$current_theta $tot_time $dist" >> "${OLDPWD}/${data_theta_file}"
+for th in "${sorted_theta_values[@]:1}"; do
+    read -r t dist < <(run_simulation "$fixed_bodies" "$fixed_nodes" \
+                       "$fixed_threads" "$th")
+    echo "$th $t $dist" >> "${OLDPWD}/${data_theta_file}"
 done
 
-echo "Phase 4 completed."
+cd "${OLDPWD}"
+
+# ---------- plotting (unchanged gnuplot blocks) ------------------------------
+# … keep your gnuplot code exactly as before …
+
 
 # =======================
 # Generate Plots using GNUplot
