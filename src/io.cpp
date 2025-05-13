@@ -335,6 +335,7 @@ void writeVTPFile(int rank, int vs_counter,
     }
 
     doc.SaveFile(filename.c_str());
+    doc.Clear();
 }
 
  // function to update (or create) a pvd file that references all vtp files for the given timestep
@@ -440,6 +441,8 @@ void updatePVDFile(const std::string &pvdFilename,
     if (saveResult != XML_SUCCESS) {
         std::cerr << "Error saving .pvd file: " << pvdPath << std::endl;
     }
+
+    doc.Clear();
 }
 
 // Save final positions to CSV for the reference run (groundtruth)
