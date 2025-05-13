@@ -1,213 +1,131 @@
 #!/usr/bin/env bash
 #SBATCH --partition=all
 #SBATCH --nodelist=simcl1n[1-4]
+#SBATCH --nodes=4                 # 4 nodes in total
+#SBATCH --ntasks-per-node=1       # 1 MPI rank per node
+#SBATCH --exclusive
+#SBATCH --time=2-00:00:00
 #SBATCH --job-name=benchmark_S2
 #SBATCH --output=benchmark_S2.out
 #SBATCH --error=benchmark_S2.err
-#SBATCH --time=2-00:00:00
-#SBATCH --nodes=4
-#SBATCH --exclusive
-#SBATCH --ntasks-per-node=1        # one MPI rank per node
 
 set -euo pipefail
 set -x
 
-# ---------- user-tunable defaults -------------------------------------------
+############ user-supplied (or default) parameters ############
 file=${1:-"../data/state_vectors_csvs/scenario2_300149.csv"}
 dt=${2:-"1h"}
 t_end=${3:-"10d"}
 vs=${4:-"12h"}
-theta=${5:-"1.05"}
+theta_start=${5:-"1.05"}          # used only for the plots’ label
 
-# ---------- bookkeeping ------------------------------------------------------
-sanitized_file=$(basename "$file" .csv | tr -c 'A-Za-z0-9' '_')
-timestamp=$(date +%Y%m%d_%H%M%S)
-benchmark_dir="benchmark_S2_0/${sanitized_file}_dt_${dt}_tend_${t_end}_vs_${vs}_theta_${theta}"
-mkdir -p "${benchmark_dir}/vs_outputs"
+############ bookkeeping ######################################
+root_dir=$(pwd)                   # remember where we started
 
-data_bodies_file="${benchmark_dir}/data_bodies.dat"
-data_threads_file="${benchmark_dir}/data_threads.dat"
-data_nodes_file="${benchmark_dir}/data_nodes.dat"
-data_theta_file="${benchmark_dir}/data_theta.dat"
+sanitized=$(basename "$file" .csv | tr -c 'A-Za-z0-9' _)
+benchmark_dir="$root_dir/benchmark_S2_0/${sanitized}_dt_${dt}_tend_${t_end}_vs_${vs}_theta_${theta_start}"
+mkdir -p "$benchmark_dir/vs_outputs"
 
-plot_bodies_file="${benchmark_dir}/plot_bodies.png"
-plot_threads_file="${benchmark_dir}/plot_threads.png"
-plot_nodes_file="${benchmark_dir}/plot_nodes.png"
-plot_theta_file="${benchmark_dir}/plot_theta.png"
+data_bodies="$benchmark_dir/data_bodies.dat"
+data_threads="$benchmark_dir/data_threads.dat"
+data_nodes="$benchmark_dir/data_nodes.dat"
+data_theta="$benchmark_dir/data_theta.dat"
 
-echo "bodies nodes threads total_time"       >  "$data_bodies_file"
-echo "nodes threads total_time"              >  "$data_threads_file"
-echo "threads nodes total_time"              >  "$data_nodes_file"
-echo "theta total_time summed_dist_error"    >  "$data_theta_file"
+echo 'bodies nodes threads total_time'     >"$data_bodies"
+echo 'nodes  threads total_time'           >"$data_threads"
+echo 'threads nodes  total_time'           >"$data_nodes"
+echo 'theta  total_time summed_dist_error' >"$data_theta"
 
-# ---------- sweep parameters -------------------------------------------------
-body_counts=(1000 10000 25000 50000 100000 200000)
-node_counts=(1 2 3 4)
-thread_counts=(1 2 4 8 12 24 48 96)
-theta_values=(0.1 0.3 0.5 0.7 1.0 1.2 1.5 2.0)
+############ compile / enter build dir ########################
+cd "$root_dir/build"
+simulate=./simulate
+[[ -x $simulate ]] || { echo "simulate not found"; exit 1; }
 
-# ---------- build & binary ---------------------------------------------------
-BUILD_DIR="./build"
-if [[ ! -d $BUILD_DIR ]]; then
-    mkdir -p "$BUILD_DIR"
-fi
-cd "$BUILD_DIR"
-
-simulate_binary=./simulate
-[[ -x $simulate_binary ]] || { echo "simulate binary missing"; exit 1; }
-
-# ---------- helper -----------------------------------------------------------
+############ helper ###########################################
 run_simulation () {
-    local bodies=$1  nodes=$2  threads=$3  theta_now=$4
-    local is_ref=${5:-false}
-
+    local bodies=$1 nodes=$2 threads=$3 theta=$4 ref=${5:-false}
     export OMP_NUM_THREADS=$threads
-    local tmp_out
-    tmp_out=$(mktemp "sim_${bodies}_${threads}.XXXX")
 
-    srun --exclusive -N "$nodes" \
-         --cpus-per-task="$threads" \
-         "$simulate_binary" \
-         --file  "$file" \
-         --dt    "$dt" \
-         --t_end "$t_end" \
-         --vs    "$vs" \
-         --vs_dir "${OLDPWD}/${benchmark_dir}/vs_outputs" \
-         --theta "$theta_now" \
-         --bodies "$bodies" \
-         ${is_ref:+-r} 2>&1 | tee "$tmp_out"
+    tmp=$(mktemp --tmpdir="$benchmark_dir" sim.XXXX)
+    # --wait=0 keeps Slurm from throwing “step creation disabled”
+    srun --exclusive --wait=0 -N "$nodes" --cpus-per-task="$threads" \
+         "$simulate" \
+         --file "$file" --dt "$dt" --t_end "$t_end" --vs "$vs" \
+         --vs_dir "$benchmark_dir/vs_outputs" \
+         --theta "$theta" --bodies "$bodies" ${ref:+-r} 2>&1 | tee "$tmp"
 
-    local total_time summed_dist
-    total_time=$(grep    "TOTAL_TIME"         "$tmp_out" | awk '{print $4}')
-    summed_dist=$(grep   "SUMMED_DIST_ERROR"  "$tmp_out" | awk '{print $4}')
-    rm -f "$tmp_out"
-
-    echo "${total_time:-na} ${summed_dist:-na}"
+    # grab the numbers printed by simulate
+    total=$(grep -m1 'TOTAL_TIME:'  "$tmp" | awk '{print $4}')
+    dist=$(  grep -m1 'SUMMED_DIST_ERROR:' "$tmp" | awk '{print $4}')
+    rm -f "$tmp"
+    echo "${total:-na} ${dist:-na}"
 }
 
-# ---------- Phase 1 – bodies -------------------------------------------------
+############ experiment ranges ################################
+body_list=(1000 10000 25000 50000 100000 200000)
+thread_list=(1 2 4 8 12 24 48 96)
+node_list=(1 2 3 4)
+theta_list=(0.1 0.3 0.5 0.7 1.0 1.2 1.5 2.0)
+
 fixed_nodes=4
 fixed_threads=48
 fixed_theta=1.05
-fixed_bodies=100000   # for later phases
+fixed_bodies=100000
 
-for b in "${body_counts[@]}"; do
+############ Phase 1: bodies ##################################
+for b in "${body_list[@]}"; do
     read -r t _ < <(run_simulation "$b" "$fixed_nodes" "$fixed_threads" "$fixed_theta")
-    echo "$b $fixed_nodes $fixed_threads $t" >> "${OLDPWD}/${data_bodies_file}"
+    echo "$b $fixed_nodes $fixed_threads $t" >>"$data_bodies"
 done
 
-# ---------- Phase 2 – threads ------------------------------------------------
-fixed_nodes_thr=1
-for th in "${thread_counts[@]}"; do
-    read -r t _ < <(run_simulation "$fixed_bodies" "$fixed_nodes_thr" "$th" "$fixed_theta")
-    echo "$fixed_nodes_thr $th $t" >> "${OLDPWD}/${data_threads_file}"
+############ Phase 2: threads (1 node) ########################
+for th in "${thread_list[@]}"; do
+    read -r t _ < <(run_simulation "$fixed_bodies" 1 "$th" "$fixed_theta")
+    echo "1 $th $t" >>"$data_threads"
 done
 
-# ---------- Phase 3 – nodes --------------------------------------------------
-for n in "${node_counts[@]}"; do
+############ Phase 3: nodes ###################################
+for n in "${node_list[@]}"; do
     read -r t _ < <(run_simulation "$fixed_bodies" "$n" "$fixed_threads" "$fixed_theta")
-    echo "$fixed_threads $n $t" >> "${OLDPWD}/${data_nodes_file}"
+    echo "$fixed_threads $n $t" >>"$data_nodes"
 done
 
-# ---------- Phase 4 – theta --------------------------------------------------
-sorted_theta_values=($(printf "%s\n" "${theta_values[@]}" | sort -n))
-reference_theta=${sorted_theta_values[0]}
-
-read -r t_ref _ < <(run_simulation "$fixed_bodies" "$fixed_nodes" \
-                    "$fixed_threads" "$reference_theta" true)
-echo "$reference_theta $t_ref 0" >> "${OLDPWD}/${data_theta_file}"
-
-for th in "${sorted_theta_values[@]:1}"; do
-    read -r t dist < <(run_simulation "$fixed_bodies" "$fixed_nodes" \
-                       "$fixed_threads" "$th")
-    echo "$th $t $dist" >> "${OLDPWD}/${data_theta_file}"
+############ Phase 4: theta scan ##############################
+read -r t_ref _ < <(run_simulation "$fixed_bodies" "$fixed_nodes" "$fixed_threads" 0.1 true)
+echo "0.1 $t_ref 0" >>"$data_theta"
+for th in "${theta_list[@]:1}"; do
+    read -r t d < <(run_simulation "$fixed_bodies" "$fixed_nodes" "$fixed_threads" "$th")
+    echo "$th $t $d" >>"$data_theta"
 done
 
-cd "${OLDPWD}"
+############ plotting (run from root) #########################
+cd "$root_dir"
 
-# ---------- plotting (unchanged gnuplot blocks) ------------------------------
-# … keep your gnuplot code exactly as before …
-
-
-# =======================
-# Generate Plots using GNUplot
-# =======================
-
-echo "Generating Plots..."
-
-# Return to the original directory to access data files
-cd "${OLDPWD}"
-
-# 1. Runtime vs. Number of Bodies
 gnuplot <<EOF
-set terminal png size 1000,800
-set output "${plot_bodies_file}"
-set title "Runtime vs. Number of Bodies (MPI Nodes: $fixed_nodes, OpenMP Threads: $fixed_threads)"
-set xlabel "Number of Bodies"
-set ylabel "Total Time (s)"
+set term png size 1000,800
 set grid
-set key outside
-
-set label "Simulation Parameters:\nFILE: $file\nDT: $dt\nT_END: $t_end\nVS: $vs\nTHETA: $fixed_theta" at graph 0.02, 0.95 left
-
-plot "${data_bodies_file}" using 1:4 with linespoints title "Runtime" lc rgb "blue"
+# ---- bodies ----
+set output "$benchmark_dir/plot_bodies.png"
+set title "Runtime vs. #Bodies"
+set xlabel "Bodies"; set ylabel "Time [s]"
+plot "$data_bodies" using 1:4 with linespoints title "time"
+# ---- threads ----
+set output "$benchmark_dir/plot_threads.png"
+set title "Runtime vs. Threads (1 node)"
+set xlabel "Threads"; set ylabel "Time [s]"
+plot "$data_threads" using 2:3 with linespoints title "time"
+# ---- nodes ----
+set output "$benchmark_dir/plot_nodes.png"
+set title "Runtime vs. Nodes ($fixed_threads threads/rank)"
+set xlabel "Nodes"; set ylabel "Time [s]"
+plot "$data_nodes" using 2:3 with linespoints title "time"
+# ---- theta ----
+set output "$benchmark_dir/plot_theta.png"
+set title "Runtime & Error vs. Theta"
+set xlabel "Theta"; set ylabel "Time [s]"; set y2label "Error"
+set ytics nomirror; set y2tics
+plot "$data_theta" using 1:2 w lp title "time", \
+     "$data_theta" using 1:3 axes x1y2 w lp title "error"
 EOF
-echo "Plot generated: $plot_bodies_file"
 
-# 2. Runtime vs. OpenMP Threads
-gnuplot <<EOF
-set terminal png size 1000,800
-set output "${plot_threads_file}"
-set title "Runtime vs. OpenMP Threads (MPI Nodes: $fixed_nodes, Bodies: $fixed_bodies)"
-set xlabel "OpenMP Threads"
-set ylabel "Total Time (s)"
-set grid
-set key outside
-
-set label "Simulation Parameters:\nFILE: $file\nDT: $dt\nT_END: $t_end\nVS: $vs\nTHETA: $fixed_theta" at graph 0.02, 0.95 left
-
-plot "${data_threads_file}" using 2:3 with linespoints title "Runtime" lc rgb "green"
-EOF
-echo "Plot generated: $plot_threads_file"
-
-# 3. Runtime vs. MPI Nodes
-gnuplot <<EOF
-set terminal png size 1000,800
-set output "${plot_nodes_file}"
-set title "Runtime vs. MPI Nodes (OpenMP Threads: $fixed_threads, Bodies: $fixed_bodies)"
-set xlabel "MPI Nodes"
-set ylabel "Total Time (s)"
-set grid
-set key outside
-
-set label "Simulation Parameters:\nFILE: $file\nDT: $dt\nT_END: $t_end\nVS: $vs\nTHETA: $fixed_theta" at graph 0.02, 0.95 left
-
-plot "${data_nodes_file}" using 2:3 with linespoints title "Runtime" lc rgb "red"
-EOF
-echo "Plot generated: $plot_nodes_file"
-
-# 4. Runtime and Distance Sum Difference vs. Theta
-gnuplot <<EOF
-set terminal png size 1000,800
-set output "${plot_theta_file}"
-set title "Runtime and Distance Sum Difference vs. Theta (θ)"
-set xlabel "Theta (θ)"
-set ylabel "Runtime (s)"
-set y2label "Distance Sum Difference"
-set grid
-set key outside
-
-# Align the y-axes
-set ytics nomirror
-set y2tics
-
-# Position labels
-set label "Simulation Parameters:\nFILE: $file\nDT: $dt\nT_END: $t_end\nVS: $vs" at graph 0.02, 0.95 left
-
-# Plot both data series
-plot "${data_theta_file}" using 1:2 with linespoints title "Runtime" lc rgb "blue", \
-     "${data_theta_file}" using 1:3 axes x1y2 with linespoints title "Distance Sum Diff" lc rgb "red"
-EOF
-echo "Plot generated: $plot_theta_file"
-
-echo "All plots have been generated in the '$benchmark_dir' directory."
+echo "✔  All results are in:  $benchmark_dir"
