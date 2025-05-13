@@ -94,7 +94,7 @@ run_simulation() {
     # build the command array
     # mpirun -np, srun --exclusive -N
     # build the command array
-    local cmd=(srun --exclusive -N "$nodes" "$simulate_binary"
+    local cmd=(srun --exclusive -N "$nodes" -c "$threads" --cpu-bind=cores "$simulate_binary"
                 --file "$file"
                 --dt   "$dt"
                 --t_end "$t_end"
