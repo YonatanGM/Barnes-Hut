@@ -389,7 +389,7 @@ void updatePVDFile(const std::string &pvdFilename,
             vtkFile = doc.FirstChildElement("VTKFile");
             if (!vtkFile) {
                 // if VTKFile element is missing, recreate it
-                doc.Clear();
+                doc.DeleteChildren();
                 vtkFile = doc.NewElement("VTKFile");
                 vtkFile->SetAttribute("type", "Collection");
                 vtkFile->SetAttribute("version", "0.1");
