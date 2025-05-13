@@ -17,9 +17,9 @@ set -x
 # match OpenMP threads to your allocation
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-echo "Running scenario 2 only... at $(date)"
+echo "Running scenario 2... at $(date)"
 srun --exclusive -N 4 -c $OMP_NUM_THREADS --cpu-bind=cores ./build/simulate \
       --file ./data/state_vectors_csvs/scenario2_300149.csv \
-      --dt 1h --t_end 1y --vs 7d --vs_dir sim_s2_0 \
+      --dt 1h --t_end 1y --vs 7d --vs_dir "sim_s1_${SLURM_JOB_ID}" \
       --theta 1.05 --bodies 150000
 echo "Scenario 2 complete at $(date)"
