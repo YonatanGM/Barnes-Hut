@@ -143,7 +143,7 @@ echo "Phase 1 completed."
 fixed_nodes_for_threads=1
 echo "Starting Phase 2: Runtime vs. OpenMP Threads"
 for threads in "${thread_counts[@]}"; do
-    metrics=$(run_simulation "$fixed_bodies" "$fixed_nodes_for_thread" "$threads" "$fixed_theta")
+    metrics=$(run_simulation "$fixed_bodies" "$fixed_nodes_for_threads" "$threads" "$fixed_theta")
     total_time=$(echo "$metrics" | awk '{print $1}')
     echo "$fixed_nodes_for_threads $threads $total_time" >> "${OLDPWD}/${data_threads_file}"
 done
