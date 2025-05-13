@@ -8,6 +8,7 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --nodes=4
 #SBATCH --exclusive
+#SBATCH --ntasks-per-node=1
 
 # Exit immediately if a command exits with a non-zero status
 set -e
@@ -93,7 +94,7 @@ run_simulation() {
     # build the command array
     # mpirun -np, srun --exclusive -N
     # build the command array
-    local cmd=(srun --exclusive -N "$nodes" -c "$threads"  "$simulate_binary"
+    local cmd=(srun --exclusive -N "$nodes" "$simulate_binary"
                 --file "$file"
                 --dt   "$dt"
                 --t_end "$t_end"
