@@ -8,6 +8,7 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --nodes=4
 #SBATCH --exclusive
+#SBATCH --ntasks-per-node=1
 
 # Exit immediately if a command exits with a non-zero status
 set -e
