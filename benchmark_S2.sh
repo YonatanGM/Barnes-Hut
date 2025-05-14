@@ -130,11 +130,11 @@ fixed_theta=1.05
 fixed_bodies=100000 # Adjust as needed
 
 echo "Starting Phase 1: Runtime vs. Number of Bodies"
-for bodies in "${body_counts[@]}"; do
-    metrics=$(run_simulation "$bodies" "$fixed_nodes" "$fixed_threads" "$fixed_theta")
-    total_time=$(echo "$metrics" | awk '{print $1}')
-    echo "$bodies $fixed_nodes $fixed_threads $total_time" >> "${OLDPWD}/${data_bodies_file}"
-done
+# for bodies in "${body_counts[@]}"; do
+#     metrics=$(run_simulation "$bodies" "$fixed_nodes" "$fixed_threads" "$fixed_theta")
+#     total_time=$(echo "$metrics" | awk '{print $1}')
+#     echo "$bodies $fixed_nodes $fixed_threads $total_time" >> "${OLDPWD}/${data_bodies_file}"
+# done
 echo "Phase 1 completed."
 
 # =======================
@@ -142,22 +142,22 @@ echo "Phase 1 completed."
 # =======================
 fixed_nodes_for_threads=1
 echo "Starting Phase 2: Runtime vs. OpenMP Threads"
-for threads in "${thread_counts[@]}"; do
-    metrics=$(run_simulation "$fixed_bodies" "$fixed_nodes_for_threads" "$threads" "$fixed_theta")
-    total_time=$(echo "$metrics" | awk '{print $1}')
-    echo "$fixed_nodes_for_threads $threads $total_time" >> "${OLDPWD}/${data_threads_file}"
-done
+# for threads in "${thread_counts[@]}"; do
+#     metrics=$(run_simulation "$fixed_bodies" "$fixed_nodes_for_threads" "$threads" "$fixed_theta")
+#     total_time=$(echo "$metrics" | awk '{print $1}')
+#     echo "$fixed_nodes_for_threads $threads $total_time" >> "${OLDPWD}/${data_threads_file}"
+# done
 echo "Phase 2 completed."
 
 # =======================
 # Phase 3: Runtime vs. MPI Nodes
 # =======================
 echo "Starting Phase 3: Runtime vs. MPI Nodes"
-for nodes in "${node_counts[@]}"; do
-    metrics=$(run_simulation "$fixed_bodies" "$nodes" "$fixed_threads" "$fixed_theta")
-    total_time=$(echo "$metrics" | awk '{print $1}')
-    echo "$fixed_threads $nodes $total_time" >> "${OLDPWD}/${data_nodes_file}"
-done
+# for nodes in "${node_counts[@]}"; do
+#     metrics=$(run_simulation "$fixed_bodies" "$nodes" "$fixed_threads" "$fixed_theta")
+#     total_time=$(echo "$metrics" | awk '{print $1}')
+#     echo "$fixed_threads $nodes $total_time" >> "${OLDPWD}/${data_nodes_file}"
+# done
 echo "Phase 3 completed."
 
 # =======================
