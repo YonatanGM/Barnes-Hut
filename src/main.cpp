@@ -46,7 +46,8 @@ int main(int argc, char* argv[]) {
 
     // default simulation parameters
     const double G = 1.48812e-34; // gravitational constant in AU^3 kg^-1 day^-2
-    double softening = 1e-11;     // softening parameter in AU
+    // double softening = 1e-11;     // softening parameter in AU
+    double softening = 0;
     double theta = 0.5;           // barnes-hut opening angle parameter
     double dt_val = 1.0;          // time step in days
     double t_end_val = 365.25;    // end time in days (default 1 year)
@@ -62,7 +63,7 @@ int main(int argc, char* argv[]) {
     bool is_reference=false;
     std::string ref_dir;
     double summed_dist_error = 0.0; // accumulated error
-
+    //  ("s,softening", "softening parameter", cxxopts::value<double>()->default_value("1e-11"))
     try {
         // set up command-line options using cxxopts
         cxxopts::Options options(argv[0], "n-body simulation with mpi & barnes-hut");
@@ -74,7 +75,7 @@ int main(int argc, char* argv[]) {
             ("v,vs", "visualization step", cxxopts::value<std::string>()->default_value("1d"))
             ("o,vs_dir", "output directory", cxxopts::value<std::string>()->default_value("sim"))
             ("theta", "barnes-hut parameter", cxxopts::value<double>()->default_value("0.5"))
-            ("s,softening", "softening parameter", cxxopts::value<double>()->default_value("1e-11"))
+            ("s,softening", "softening parameter", cxxopts::value<double>()->default_value("0"))
             ("b,bodies", "number of bodies to simulate", cxxopts::value<int>()->default_value("-1"))
             ("l,log", "enable logging", cxxopts::value<bool>()->default_value("true")->implicit_value("true"))
             ("r,reference", "run as reference (ground truth)", cxxopts::value<bool>()->default_value("false"))
