@@ -2,8 +2,9 @@
 
 ## Diagram 1: Runtime vs Number of Bodies
 
-![Runtime vs Number of Bodies](benchmark/bodies.png)
-![Runtime vs Number of Bodies](benchmark/bodies_log.png)
+| | |
+|:--:|:--:|
+| ![](benchmark/bodies.png) | ![](benchmark/bodies_log.png) |
 
 The first plot shows the runtime growing from a few seconds to about an hour as we go from 1000 to 300,000 bodies. The upward curve means that the growth is non linear.
 
@@ -20,9 +21,10 @@ The gray line shows the ideal case where doubling the number of nodes would halv
 
 ## Diagram 3: Runtime vs OpenMP Threads
 
-![Runtime vs OpenMP Threads s1](benchmark/threads_semilogx_s2.png)
+| | |
+|:--:|:--:|
+| ![](benchmark/threads_semilogx_s2.png) | ![](benchmark/threads_semilogx_s1.png) |
 
-![Runtime vs OpenMP Threads s2](benchmark/threads_semilogx_s1.png)
 
 Runtime drops quickly as more threads are used, but the gains get smaller as the thread count increases. For both scenarios, the improvement is steep up to around 24 threads, then levels off. This makes sense since the machine has 24 cores per socket, and going beyond that likely adds overhead. In the smaller scenario, performance even gets slightly worse at 96 threads.
 
