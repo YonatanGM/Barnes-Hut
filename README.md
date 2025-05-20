@@ -37,7 +37,32 @@ To run with fewer bodies, add the --bodies option. For more details, use --help.
 
 You can also use `sbatch scenario_1.sh` or `sbatch scenario_2.sh` to run the job. Timing results are based on these scripts.
 
-## Results
+## Generating the scenario files
+
+The orbital element CSVs are in data/orbital_elements_raw_csvs.
+
+* For scenario 2, large asteroid data (300,000 bodies) comes from the JPL database.
+* Planets and moons, and small asteroid data are from Ilias.
+
+To generate the state vector CSVs for each scenario, first convert the planet/moon and asteroid orbital element CSVs to state vectors, then combine them.
+
+There’s a command-line tool for this:
+
+To build:
+
+```bash
+g++ -std=c++17 -o orbital_converter src/orbital_converter.cpp src/kepler_to_cartesian.cpp -I./include
+```
+
+To run:
+
+```bash
+./orbital_converter <planets_and_moons.csv> <asteroids.csv> <output_dir>
+```
+
+This will output combined state vector CSVs in the specified folder.
+
+## Result
 
 Scenario 1: 19,054 bodies in 1213.48 seconds (\~20 minutes)
 
@@ -67,61 +92,3 @@ Inside the simulation loop:
 * Each rank writes VTP files for its assigned bodies, while the root rank manages updates to the PVD file that aggregates all outputs.
 
 The acceleration calculations, position, and velocity updates are parallelized with OpenMP.
-
-
-## Benchmarks
-
-### Diagram 1: Runtime vs. Number of Bodies
-This shows how runtime changes as the number of bodies increases, with 4 MPI nodes and 32 OpenMP threads.
-
-![Runtime vs. Number of Bodies](benchmark/scenario2__dt_1h_tend_1d_vs_1d_theta_1.05/plot_bodies.png)
-
-**Analysis:**
-The runtime increases linearly with the number of bodies. This makes sense because more bodies mean more interactions to calculate.
-
----
-
-### Diagram 2: Runtime vs. MPI Nodes
-This shows how runtime changes as we add more MPI nodes, keeping 32 OpenMP threads and 300,000 bodies.
-
-![Runtime vs. MPI Nodes](benchmark/scenario2__dt_1h_tend_1d_vs_1d_theta_1.05/plot_nodes.png)
-
-**Analysis:**
-As more MPI nodes are added, the runtime decreases because the workload is divided across more nodes. However, the speedup is not perfectly linear. We think this might be due to MPI communication or synchronization overhead as more nodes are used.
-
----
-
-### Diagram 3: Runtime vs. OpenMP Threads
-This shows how runtime changes with more OpenMP threads, using 4 MPI nodes and 300,000 bodies.
-
-![Runtime vs. OpenMP Threads](benchmark/scenario2__dt_1h_tend_1d_vs_1d_theta_1.05/plot_threads.png)
-
-**Analysis:**
-Runtime improves as more threads are added, especially up to about 32 threads. Beyond that, the gains slow down, likely due to hardware limitations (like core count) and the overhead of managing additional threads.
-
----
-
-### Diagram 4: Runtime and Distance Sum Difference vs. θ
-This compares runtime and accuracy (distance sum difference) as θ changes for a fixed problem with 300,000 bodies, using 4 MPI nodes and 32 OpenMP threads.
-
-![Runtime and Distance Sum Difference vs. θ](benchmark/scenario2__dt_1h_tend_1d_vs_1d_theta_1.05/plot_theta.png)
-
-**Analysis:**
-For each θ, the final positions of all bodies were summed component-wise at the last timestep and compared to the sum from the run with θ = 0.01 (the reference). Smaller θ values (< 0.5) are significantly slower because they use a stricter Barnes-Hut criterion, allowing fewer approximations. Larger θ values are faster due to more approximations. Interestingly, except for θ = 2.0, there was no difference in the summed positions—all other runs matched the reference exactly.
-
----
-
-### Diagram 5: Nodes vs. Threads vs. Time
-These diagrams provide a combined view of how both MPI node count and OpenMP thread count affect runtime on the same plot. This makes it easy to identify the best combination of nodes and threads.
-
-![Scenario 1](benchmark/plot____data_scenario1_csv_1h_1d_1d_1.05.png)
-![Scenario 2](benchmark/plot____data_scenario2_csv_1h_1d_1d_1.05.png)
-
-**Analysis:**
-We can see that the generally the times are decreasing with more nodes and threads.
-However, it's not exactly linear. For scenario 1, we get fastest time using 4 nodes and just 8 threads.
-For scenario 2, different combination give best times like using all 4 nodes, 2 nodes with 32 threads or single node using all threads, etc. Another observation is that as we increase the number of threads, the performance improvement from adding more nodes becomes less.
-
----
-
-To replicate these results, run the ./benchmark.sh script. The benchmark uses our dataset for scenario 2, and the results will be saved in the benchmark folder inside the build directory.
