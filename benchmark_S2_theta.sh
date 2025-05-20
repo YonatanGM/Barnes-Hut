@@ -166,7 +166,7 @@ echo "Phase 3 completed."
 echo "Starting Phase 4: Runtime and Distance Sum vs. Theta"
 
 # Sort theta_values in ascending order to identify the smallest theta
-# sorted_theta_values=($(printf "%s\n" "${theta_values[@]}" | sort -n))
+sorted_theta_values=($(printf "%s\n" "${theta_values[@]}" | sort -n))
 
 # Extract the smallest theta as the reference
 reference_theta=${sorted_theta_values[0]}
