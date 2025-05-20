@@ -1,57 +1,73 @@
 # Parallel N-body Simulation
+
 [![Pipeline Status](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/badges/phase-1/pipeline.svg)](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/-/pipelines)
 [![Coverage](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/badges/phase-1/coverage.svg)](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/-/pipelines)
 
+## How to build
 
-## Building the Project
 To build the project, run:
+
 ```bash
 mkdir build
 cd build
 cmake ..
 make
 ```
-This builds the executable and tests, which you can run using `ctest`. To check test coverage, run
-`
-make coverage
-`
 
----
+This builds the executable and tests which you can run using `ctest`. To check test coverage, build using `cmake -DENABLE_COVERAGE=ON ..`, then run
+`make coverage`.
 
-## Approach
-- The root process broadcasts the total number of bodies, their masses, initial positions, and velocities to all MPI ranks using `MPI_Bcast`, so all ranks start with the same global data.
-- Masses, positions, velocities, names, and orbit classes are distributed to MPI ranks using `MPI_Scatterv`, giving each rank a subset of bodies to handle.
-- Each rank calculates the initial accelerations for its assigned bodies using their local data and global data (like positions and masses of all bodies) before entering the simulation loop.
+## How to run
 
-Inside the simulation loop:
-- Each rank performs a full-step position update and a half-step velocity update for its assigned bodies.
-- Updated positions are gathered globally across all ranks using `MPI_Allgatherv`, ensuring that every rank has the full updated state of all bodies needed for the next computation.
-- A second half-step velocity update is performed to finalize the integration step.
-- Accelerations are calculated for each body based on the updated global positions using the Barnes-Hut algorithm.
-- Global kinetic and potential energies are calculated by summing contributions from all ranks using `MPI_Allreduce`.
-- Each rank writes VTP files for its assigned bodies, while the root rank manages updates to the PVD file that aggregates all outputs.
+The CSV files are in data/state_vectors_csvs. Run these commands from the build folder.
 
-The acceleration calculations, position, and velocity updates are parallelized with OpenMP. We tried parallel octree construction on multiple threads but didn't see performance gains (performs similarly or slightly worse). The implementation is included in this project.
+Scenario 1:
 
----
+```bash
+srun -N 4 ./simulate --file ../data/state_vectors_csvs/scenario1_19054.csv --dt 1h --t_end 12y --vs 2d --vs_dir sim_s1 --theta 1.05
+```
+
+Scenario 2:
+
+```bash
+srun -N 4 ./simulate --file ../data/state_vectors_csvs/scenario2_300149.csv --dt 1h --t_end 1y --vs 7d --vs_dir sim_s2 --theta 1.05
+```
+
+To run with fewer bodies, add the --bodies option. For more details, use --help.
+
+You can also use `sbatch scenario_1.sh` or `sbatch scenario_2.sh` to run the job. Timing results are based on these scripts.
 
 ## Results
-The datasets (CSV) for Scenario 1 and Scenario 2 are in the `data` folder. The animation for scenario 1, the final timestep CSV files for both scenarios, along with screenshots from ParaView (with energy plot), are also in the same folder.
 
-### Scenario 1
-```bash
-srun --exclusive -N 4 ./simulate --file ../data/scenario1.csv --dt 1h --t_end 12y --vs 2d --vs_dir sim_s1 --theta 1.05 --log
-```
-The simulation took 25 minutes for ~19,000 bodies (1488.58 seconds for 19,054 bodies).
+Scenario 1: 19,054 bodies in 1213.48 seconds (\~20 minutes)
 
-**Note:** Use the `--log` option to monitor the simulation's progress. To limit the number of bodies, use the `--bodies` option. To get more information, use `--help`.
-### Scenario 2
-```bash
-srun --exclusive -N 4 ./simulate --file ../data/scenario2_306051.csv --dt 1h --t_end 1y --vs 7d --vs_dir sim_s2 --theta 1.05
-```
-We managed to simulate up to 300,000 bodies in under 30 minutes (1889 seconds for 306,051 bodies).
+Scenario 2: 300,000 bodies in 1665.55 seconds (\~28 minutes)
 
----
+See the `result` folder for:
+
+* Scenario 1 animation
+* Final timestep CSVs for both scenarios
+* ParaView screenshots and energy plot
+
+See [performance\_analysis.md](performance_analysis.md) for benchmark results.
+
+## Approach
+
+* The root process broadcasts the total number of bodies, their masses, initial positions, and velocities to all MPI ranks using `MPI_Bcast`, so all ranks start with the same global data.
+* Masses, positions, velocities, names, and orbit classes are distributed to MPI ranks using `MPI_Scatterv`, giving each rank a subset of bodies to handle.
+* Each rank calculates the initial accelerations for its assigned bodies using their local data and global data (like positions and masses of all bodies) before entering the simulation loop.
+
+Inside the simulation loop:
+
+* Each rank performs a full-step position update and a half-step velocity update for its assigned bodies.
+* Updated positions are gathered globally across all ranks using `MPI_Allgatherv`, ensuring that every rank has the full updated state of all bodies needed for the next computation.
+* A second half-step velocity update is performed to finalize the integration step.
+* Accelerations are calculated for each body based on the updated global positions.
+* Global kinetic and potential energies are calculated by summing contributions from all ranks using `MPI_Allreduce`.
+* Each rank writes VTP files for its assigned bodies, while the root rank manages updates to the PVD file that aggregates all outputs.
+
+The acceleration calculations, position, and velocity updates are parallelized with OpenMP.
+
 
 ## Benchmarks
 
@@ -108,7 +124,4 @@ For scenario 2, different combination give best times like using all 4 nodes, 2 
 
 ---
 
-
-
 To replicate these results, run the ./benchmark.sh script. The benchmark uses our dataset for scenario 2, and the results will be saved in the benchmark folder inside the build directory.
-
