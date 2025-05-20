@@ -134,7 +134,7 @@ for bodies in "${body_counts[@]}"; do
     metrics=$(run_simulation "$bodies" "$fixed_nodes" "$fixed_threads" "$fixed_theta")
     total_time=$(echo "$metrics" | awk '{print $1}')
     echo "$bodies $fixed_nodes $fixed_threads $total_time" >> "${OLDPWD}/${data_bodies_file}"
-# done
+done
 echo "Phase 1 completed."
 
 # =======================
