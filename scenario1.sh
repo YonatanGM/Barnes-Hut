@@ -14,7 +14,6 @@
 set -e
 set -x
 
-# match OpenMP threads to your allocation
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 echo "Running scenario 1... at $(date)"
