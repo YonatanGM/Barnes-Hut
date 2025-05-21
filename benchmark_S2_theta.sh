@@ -16,8 +16,8 @@ set -x
 # Default Parameters
 file=${1:-"../data/state_vectors_csvs/scenario2_300149.csv"}
 dt=${2:-"1h"}
-t_end=${3:-"10d"}
-vs=${4:-"12h"}
+t_end=${3:-"1y"}
+vs=${4:-"2d"}
 theta=${5:-"1.05"}
 
 # Setup Benchmark Directory
@@ -127,7 +127,7 @@ run_simulation() {
 fixed_nodes=4
 fixed_threads=48
 fixed_theta=1.05
-fixed_bodies=100000 # Adjust as needed
+fixed_bodies=10000 # Adjust as needed
 
 echo "Starting Phase 1: Runtime vs. Number of Bodies"
 # for bodies in "${body_counts[@]}"; do
