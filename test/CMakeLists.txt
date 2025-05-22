@@ -4,6 +4,9 @@ cmake_minimum_required(VERSION 3.16.3)
 # Enable testing
 enable_testing()
 
+# Include CMake’s GoogleTest helper module for discovery
+include(GoogleTest)
+
 # Always fetch and integrate Google Test
 include(FetchContent)
 FetchContent_Declare(
@@ -20,26 +23,27 @@ FetchContent_MakeAvailable(googletest)
 # Include directories for the code under test
 include_directories(${CMAKE_SOURCE_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/include)
+
 # Define tests for the project
 add_executable(test_parse_time test_parse_time.cpp)
 target_link_libraries(test_parse_time PRIVATE gtest gtest_main)
-add_test(NAME test_parse_time COMMAND test_parse_time)
+gtest_discover_tests(test_parse_time)
 
 add_executable(test_io test_io.cpp ../src/io.cpp)
 target_link_libraries(test_io PRIVATE solar_system_lib gtest gtest_main)
-add_test(NAME test_io COMMAND test_io)
+gtest_discover_tests(test_io)
 
 add_executable(test_integration test_integration.cpp ../src/integration.cpp)
 target_link_libraries(test_integration PRIVATE solar_system_lib gtest gtest_main)
-add_test(NAME test_integration COMMAND test_integration)
+gtest_discover_tests(test_integration)
 
 add_executable(test_octree test_octree.cpp ../src/octree.cpp)
 target_link_libraries(test_octree PRIVATE solar_system_lib gtest gtest_main)
-add_test(NAME test_octree COMMAND test_octree)
+gtest_discover_tests(test_octree)
 
 add_executable(test_barnes_hut test_barnes_hut.cpp ../src/barnes_hut.cpp ../src/octree.cpp)
 target_link_libraries(test_barnes_hut PRIVATE solar_system_lib gtest gtest_main)
-add_test(NAME test_barnes_hut COMMAND test_barnes_hut)
+gtest_discover_tests(test_barnes_hut)
 
 
 if(ENABLE_COVERAGE)
