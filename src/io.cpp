@@ -8,168 +8,96 @@
 #include <cstring>
 #include <unordered_map>
 #include <filesystem>
-
-// Global stable map for orbit_class strings
-// assign incremental IDs as we encounter new classes
-static std::unordered_map<std::string,int> orbitClassMap;
-static int orbitClassCounter=0;
+#include "tinyxml2.h" 
 
 
-// function to read csv and populate vectors, with optional max_bodies limit
-bool readCSV(const std::string& filename,
-             std::vector<double>& masses,
-             std::vector<Position>& positions,
-             std::vector<Velocity>& velocities,
-             std::vector<std::string>& names,
-             std::vector<int>& orbit_classes,
-             int max_bodies) { // added max_bodies parameter
+bool readCSV(
+    const std::string& filename,
+    std::vector<uint64_t>& ids, // New parameter
+    std::vector<double>& masses,
+    std::vector<Position>& positions,
+    std::vector<Velocity>& velocities,
+    int body_count) {
+
     std::ifstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "error opening csv file: " << filename << "\n";
+        std::cerr << "Error: Could not open file " << filename << std::endl;
         return false;
     }
 
-    std::string line;
-    if (!std::getline(file, line)) {
-        std::cerr << "empty file or error reading csv: " << filename << "\n";
-        return false;
-    }
-
-    // process the header line
-    std::istringstream headerStream(line);
-    std::vector<std::string> headers;
-    {
-        std::string h;
-        while (std::getline(headerStream, h, ',')) {
-            headers.push_back(h);
-        }
-    }
-
-    std::unordered_map<std::string, int> headerMap;
-    for (size_t i = 0; i < headers.size(); i++) {
-        headerMap[headers[i]] = (int)i;
-    }
-
-    // validate required headers
-    std::vector<std::string> required = {"id", "name", "class", "mass", "pos_x", "pos_y", "pos_z", "vel_x", "vel_y", "vel_z"};
-    for (auto &r : required) {
-        if (headerMap.find(r) == headerMap.end()) {
-            std::cerr << "missing required header: " << r << "\n";
-            return false;
-        }
-    }
-
+    // Clear vectors to ensure they are empty before reading new data
+    ids.clear();
     masses.clear();
     positions.clear();
     velocities.clear();
-    names.clear();
-    orbit_classes.clear();
 
-    int count = 0; // counter for the number of bodies read
+    std::string line;
+    // Skip the header line of the CSV file
+    std::getline(file, line);
+
+    uint64_t current_id = 0; 
 
     while (std::getline(file, line)) {
-        if (line.empty()) continue;
-        std::istringstream iss(line);
-        std::vector<std::string> tokens;
-        std::string token;
-        while (std::getline(iss, token, ',')) {
-            tokens.push_back(token);
+        // Stop if the desired number of bodies has been read
+        if (body_count > 0 && masses.size() >= static_cast<size_t>(body_count)) {
+            break;
         }
 
-        if (tokens.size() < 10) continue; // skip malformed lines
-
+        std::stringstream ss(line);
+        std::string field;
+        
         try {
-            std::string nm = tokens.at(headerMap.at("name"));
-            std::string cl = tokens.at(headerMap.at("class"));
+            // Skip unused columns: id, name, class
+            std::getline(ss, field, ','); // Skip id
+            std::getline(ss, field, ','); // Skip name
+            std::getline(ss, field, ','); // Skip class
 
-            double m = std::stod(tokens.at(headerMap.at("mass")));
-            double x = std::stod(tokens.at(headerMap.at("pos_x")));
-            double y = std::stod(tokens.at(headerMap.at("pos_y")));
-            double z = std::stod(tokens.at(headerMap.at("pos_z")));
-            double vx = std::stod(tokens.at(headerMap.at("vel_x")));
-            double vy = std::stod(tokens.at(headerMap.at("vel_y")));
-            double vz = std::stod(tokens.at(headerMap.at("vel_z")));
+            // Read the required data: mass, position, velocity
+            double mass, px, py, pz, vx, vy, vz;
+            
+            std::getline(ss, field, ','); mass = std::stod(field);
+            std::getline(ss, field, ','); px = std::stod(field);
+            std::getline(ss, field, ','); py = std::stod(field);
+            std::getline(ss, field, ','); pz = std::stod(field);
+            std::getline(ss, field, ','); vx = std::stod(field);
+            std::getline(ss, field, ','); vy = std::stod(field);
+            std::getline(ss, field, ','); vz = std::stod(field);
 
-            int oc;
-            auto it = orbitClassMap.find(cl);
-            if (it == orbitClassMap.end()) {
-                oc = orbitClassCounter++;
-                orbitClassMap[cl] = oc;
-            } else {
-                oc = it->second;
-            }
-
-            masses.push_back(m);
-            positions.push_back({x, y, z});
+            // Store the parsed values
+            masses.push_back(mass);
+            positions.push_back({px, py, pz});
             velocities.push_back({vx, vy, vz});
-            names.push_back(nm);
-            orbit_classes.push_back(oc);
 
-            count++;
-            // stop reading if max_bodies is reached
-            if (max_bodies > 0 && count >= max_bodies) {
-                break;
-            }
+            ids.push_back(current_id++);
 
-        } catch (...) {
-            // skip malformed line
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: Could not parse line, skipping: \"" << line << "\"" << std::endl;
         }
     }
 
-    file.close();
     return true;
 }
 
-// function to save intermediate simulation state for visualization
-void saveState(const std::string& vs_dir, int vs_counter,
-               const std::vector<double>& masses,
-               const std::vector<Position>& positions,
-               const std::vector<Velocity>& velocities) {
-    std::ostringstream vs_filename_stream;
-    vs_filename_stream<<vs_dir<<"/output_"<<std::setw(5)<<std::setfill('0')<<vs_counter<<".csv";
-    std::string vs_filename=vs_filename_stream.str();
 
-    std::ofstream vs_file(vs_filename);
-    if (!vs_file.is_open()) {
-        std::cerr<<"Failed to open visualization file:"<<vs_filename<<"\n";
-    } else {
-        vs_file<<"id,mass,x,y,z,vx,vy,vz\n";
-        for (size_t i=0;i<masses.size();i++){
-            vs_file<<i<<","<<masses[i]<<","
-                   <<positions[i].x<<","<<positions[i].y<<","<<positions[i].z<<","
-                   <<velocities[i].vx<<","<<velocities[i].vy<<","<<velocities[i].vz<<"\n";
-        }
-        vs_file.close();
-    }
-}
-
-
-
-// function to write a vtp file for visualization
-void writeVTPFile(int rank, int vs_counter,
-                  const std::vector<double> &local_masses,
-                  const std::vector<Position> &local_positions,
-                  const std::vector<Velocity> &local_velocities,
-                  const std::vector<Acceleration> &local_accelerations,
-                  const std::vector<std::string> &local_names,
-                  const std::vector<int> &local_orbit_classes,
-                  int body_id_offset,
-                  double kinetic_energy,
-                  double potential_energy,
-                  double total_energy,
-                  double virial_equilibrium,
-                  const std::string &vs_dir) {
+/**
+ * @brief Writes a snapshot file for one rank in VTP format.
+ * Adapted from your original writeVTPFile.
+ */
+void writeSnapshot(int rank, int vs_counter,
+                   const std::vector<uint64_t>& local_ids,      
+                   const std::vector<double>& local_masses,
+                   const std::vector<Position>& local_positions,
+                   const std::vector<Velocity>& local_velocities,
+                   const std::vector<Acceleration>& local_accelerations,
+                   const std::string& vs_dir)
+{
     using namespace tinyxml2;
     namespace fs = std::filesystem;
-
+    (void)local_accelerations;
     int numPoints = static_cast<int>(local_masses.size());
     if (numPoints == 0) return;
 
-    std::vector<int> body_ids(numPoints);
-    for (int i = 0; i < numPoints; i++) {
-        body_ids[i] = body_id_offset + i;
-    }
-
+    // Create a subdirectory for each rank, just like the original
     fs::path rank_dir = fs::path(vs_dir) / std::to_string(rank);
     fs::create_directories(rank_dir);
     std::string filename = (rank_dir / ("sim." + std::to_string(vs_counter) + ".vtp")).string();
@@ -185,7 +113,6 @@ void writeVTPFile(int rank, int vs_counter,
     XMLElement* polyData = doc.NewElement("PolyData");
     vtkFile->InsertEndChild(polyData);
 
-    // Piece Element
     XMLElement* piece = doc.NewElement("Piece");
     piece->SetAttribute("NumberOfPoints", numPoints);
     piece->SetAttribute("NumberOfVerts", numPoints);
@@ -195,15 +122,14 @@ void writeVTPFile(int rank, int vs_counter,
     {
         XMLElement* points = doc.NewElement("Points");
         piece->InsertEndChild(points);
-
         XMLElement* da = doc.NewElement("DataArray");
         da->SetAttribute("type", "Float64");
         da->SetAttribute("Name", "position");
         da->SetAttribute("NumberOfComponents", 3);
         da->SetAttribute("format", "ascii");
         std::ostringstream ss;
-        for (int i = 0; i < numPoints; i++) {
-            ss << local_positions[i].x << " " << local_positions[i].y << " " << local_positions[i].z << "\n";
+        for (const auto& p : local_positions) {
+            ss << p.x << " " << p.y << " " << p.z << "\n";
         }
         da->InsertEndChild(doc.NewText(ss.str().c_str()));
         points->InsertEndChild(da);
@@ -214,277 +140,215 @@ void writeVTPFile(int rank, int vs_counter,
         XMLElement* pd = doc.NewElement("PointData");
         piece->InsertEndChild(pd);
 
-        auto writeIntArray = [&](const char* name, const std::vector<int>& arr) {
-            XMLElement* da = doc.NewElement("DataArray");
-            da->SetAttribute("type", "Int32");
-            da->SetAttribute("Name", name);
-            da->SetAttribute("NumberOfComponents", 1);
-            da->SetAttribute("format", "ascii");
-            std::ostringstream ss;
-            for (auto v : arr) ss << v << "\n";
-            da->InsertEndChild(doc.NewText(ss.str().c_str()));
-            pd->InsertEndChild(da);
-        };
+        // --- body_id ---
+        XMLElement* da_id = doc.NewElement("DataArray");
+        da_id->SetAttribute("type", "UInt64");
+        da_id->SetAttribute("Name", "body_id");
+        da_id->SetAttribute("format", "ascii");
+        std::ostringstream ss_id;
+        for (auto v : local_ids) ss_id << v << "\n";
+        da_id->InsertEndChild(doc.NewText(ss_id.str().c_str()));
+        pd->InsertEndChild(da_id);
 
-        auto writeFloatArray = [&](const char* name, const std::vector<double>& arr, int comps = 1) {
-            XMLElement* da = doc.NewElement("DataArray");
-            da->SetAttribute("type", "Float64");
-            da->SetAttribute("Name", name);
-            da->SetAttribute("NumberOfComponents", comps);
-            da->SetAttribute("format", "ascii");
-            std::ostringstream ss;
-            if (comps == 1) {
-                for (auto v : arr) ss << v << "\n";
-            } else {
-                if (std::string(name) == "velocity") {
-                    for (int i = 0; i < numPoints; i++) {
-                        ss << local_velocities[i].vx << " " << local_velocities[i].vy << " " << local_velocities[i].vz << "\n";
-                    }
-                }
-            }
-            da->InsertEndChild(doc.NewText(ss.str().c_str()));
-            pd->InsertEndChild(da);
-        };
-
-        // body_id
-        writeIntArray("body_id", body_ids);
-
-        // velocity
-        writeFloatArray("velocity", {}, 3); // Empty vector since handled above
-
-        // acceleration magnitude
-        {
-            std::vector<double> acc_magnitude(numPoints);
-            for (int i = 0; i < numPoints; i++) {
-                double ax = local_accelerations[i].ax;
-                double ay = local_accelerations[i].ay;
-                double az = local_accelerations[i].az;
-                acc_magnitude[i] = std::sqrt(ax * ax + ay * ay + az * az);
-            }
-            writeFloatArray("acceleration", acc_magnitude, 1);
+        // --- velocity ---
+        XMLElement* da_vel = doc.NewElement("DataArray");
+        da_vel->SetAttribute("type", "Float64");
+        da_vel->SetAttribute("Name", "velocity");
+        da_vel->SetAttribute("NumberOfComponents", 3);
+        da_vel->SetAttribute("format", "ascii");
+        std::ostringstream ss_vel;
+        for (const auto& v : local_velocities) {
+            ss_vel << v.x << " " << v.y << " " << v.z << "\n";
         }
+        da_vel->InsertEndChild(doc.NewText(ss_vel.str().c_str()));
+        pd->InsertEndChild(da_vel);
 
-        // mass
-        writeFloatArray("mass", local_masses, 1);
-
-        // name
-        {
-            XMLElement* da_name = doc.NewElement("DataArray");
-            da_name->SetAttribute("type", "String");
-            da_name->SetAttribute("Name", "name");
-            da_name->SetAttribute("NumberOfComponents", 1);
-            da_name->SetAttribute("format", "ascii");
-            std::ostringstream ns;
-            for (const auto &nm : local_names) {
-                for (char c : nm) ns << static_cast<int>(c) << " ";
-                ns << "0\n";
-            }
-            da_name->InsertEndChild(doc.NewText(ns.str().c_str()));
-            pd->InsertEndChild(da_name);
-        }
-
-        // orbit_class
-        writeIntArray("orbit_class", local_orbit_classes);
-    }
-
-    // FieldData
-    {
-        XMLElement* fieldData = doc.NewElement("FieldData");
-        polyData->InsertEndChild(fieldData);
-
-        auto writeScalar = [&](const char* name, double val) {
-            XMLElement* da = doc.NewElement("DataArray");
-            da->SetAttribute("type", "Float64");
-            da->SetAttribute("Name", name);
-            da->SetAttribute("NumberOfTuples", 1);
-            da->SetAttribute("format", "ascii");
-            std::ostringstream ss; ss << val;
-            da->InsertEndChild(doc.NewText(ss.str().c_str()));
-            fieldData->InsertEndChild(da);
-        };
-
-        writeScalar("kinetic energy", kinetic_energy);
-        writeScalar("potential energy", potential_energy);
-        writeScalar("total energy", total_energy);
-        writeScalar("virial equilibrium", virial_equilibrium);
+        // --- mass ---
+        XMLElement* da_mass = doc.NewElement("DataArray");
+        da_mass->SetAttribute("type", "Float64");
+        da_mass->SetAttribute("Name", "mass");
+        da_mass->SetAttribute("format", "ascii");
+        std::ostringstream ss_mass;
+        for (auto v : local_masses) ss_mass << v << "\n";
+        da_mass->InsertEndChild(doc.NewText(ss_mass.str().c_str()));
+        pd->InsertEndChild(da_mass);
     }
 
     // Verts
     {
         XMLElement* verts = doc.NewElement("Verts");
         piece->InsertEndChild(verts);
-
-        {
-            XMLElement* da = doc.NewElement("DataArray");
-            da->SetAttribute("type", "Int64");
-            da->SetAttribute("Name", "offsets");
-            std::ostringstream ss;
-            for (int i = 1; i <= numPoints; i++) ss << i << " ";
-            da->InsertEndChild(doc.NewText(ss.str().c_str()));
-            verts->InsertEndChild(da);
-        }
-
-        {
-            XMLElement* da = doc.NewElement("DataArray");
-            da->SetAttribute("type", "Int64");
-            da->SetAttribute("Name", "connectivity");
-            std::ostringstream ss;
-            for (int i = 0; i < numPoints; i++) ss << i << " ";
-            da->InsertEndChild(doc.NewText(ss.str().c_str()));
-            verts->InsertEndChild(da);
-        }
+        // Offsets
+        XMLElement* da_offsets = doc.NewElement("DataArray");
+        da_offsets->SetAttribute("type", "Int64");
+        da_offsets->SetAttribute("Name", "offsets");
+        da_offsets->SetAttribute("format", "ascii");
+        std::ostringstream ss_offsets;
+        for (int i = 1; i <= numPoints; i++) ss_offsets << i << " ";
+        da_offsets->InsertEndChild(doc.NewText(ss_offsets.str().c_str()));
+        verts->InsertEndChild(da_offsets);
+        // Connectivity
+        XMLElement* da_conn = doc.NewElement("DataArray");
+        da_conn->SetAttribute("type", "Int64");
+        da_conn->SetAttribute("Name", "connectivity");
+        da_conn->SetAttribute("format", "ascii");
+        std::ostringstream ss_conn;
+        for (int i = 0; i < numPoints; i++) ss_conn << i << " ";
+        da_conn->InsertEndChild(doc.NewText(ss_conn.str().c_str()));
+        verts->InsertEndChild(da_conn);
     }
-
     doc.SaveFile(filename.c_str());
 }
 
- // function to update (or create) a pvd file that references all vtp files for the given timestep
-void updatePVDFile(const std::string &pvdFilename,
+void updatePVDFile(const cxxopts::ParseResult& args,
                    int size,
                    int vs_counter,
                    double current_time,
-                   const std::string &vs_dir) {
+                   const std::string& vs_dir)
+{
     using namespace tinyxml2;
 
+    std::string input_stem = std::filesystem::path(args["file"].as<std::string>()).stem().string();
+    std::string dt_str = args["dt"].as<std::string>();
+    std::string tend_str = args["tend"].as<std::string>();
+    double theta = args["theta"].as<double>();
+    int nbodies = args["bodies"].as<int>();
+
+    std::ostringstream oss_fname;
+    oss_fname << input_stem
+            << "_dt" << dt_str
+            << "_tend" << tend_str
+            << "_theta" << theta
+            << "_bodies" << nbodies
+            << ".pvd";
+    std::string pvdFilename = oss_fname.str();
+    std::string pvdPath = (std::filesystem::path(vs_dir) / pvdFilename).string();
+
     XMLDocument doc;
-    XMLError e;
+    XMLError e = doc.LoadFile(pvdPath.c_str());
 
     XMLElement* vtkFile = nullptr;
     XMLElement* collection = nullptr;
 
-    std::string pvdPath = (std::filesystem::path(vs_dir) / pvdFilename).string();
-
-    if (vs_counter == 0) {
-        // create a new .pvd file or overwrite existing one
+    if (e != XML_SUCCESS) {
         vtkFile = doc.NewElement("VTKFile");
         vtkFile->SetAttribute("type", "Collection");
-        vtkFile->SetAttribute("version", "0.1");
-        vtkFile->SetAttribute("byte_order", "LittleEndian");
-        vtkFile->SetAttribute("compressor", "vtkZLibDataCompressor");
         doc.InsertFirstChild(vtkFile);
-
-        // Create the Collection element
         collection = doc.NewElement("Collection");
         vtkFile->InsertEndChild(collection);
-    }
-    else {
-
-        // attempt to load the existing .pvd file
-        e = doc.LoadFile(pvdPath.c_str());
-
-        if (e != XML_SUCCESS) {
-            // if loading fails like file doesnt exist, create a new .pvd structure
+    } else {
+        vtkFile = doc.FirstChildElement("VTKFile");
+        collection = vtkFile ? vtkFile->FirstChildElement("Collection") : nullptr;
+        if (!collection) {
+            doc.Clear();
             vtkFile = doc.NewElement("VTKFile");
-            vtkFile->SetAttribute("type", "Collection");
-            vtkFile->SetAttribute("version", "0.1");
-            vtkFile->SetAttribute("byte_order", "LittleEndian");
-            vtkFile->SetAttribute("compressor", "vtkZLibDataCompressor");
             doc.InsertFirstChild(vtkFile);
-
             collection = doc.NewElement("Collection");
             vtkFile->InsertEndChild(collection);
         }
-        else {
-            // locate the VTKFile element
-            vtkFile = doc.FirstChildElement("VTKFile");
-            if (!vtkFile) {
-                // if VTKFile element is missing, recreate it
-                doc.Clear();
-                vtkFile = doc.NewElement("VTKFile");
-                vtkFile->SetAttribute("type", "Collection");
-                vtkFile->SetAttribute("version", "0.1");
-                vtkFile->SetAttribute("byte_order", "LittleEndian");
-                vtkFile->SetAttribute("compressor", "vtkZLibDataCompressor");
-                doc.InsertFirstChild(vtkFile);
-
-                collection = doc.NewElement("Collection");
-                vtkFile->InsertEndChild(collection);
-            }
-            else {
-                // locate the Collection element within VTKFile
-                collection = vtkFile->FirstChildElement("Collection");
-                if (!collection) {
-                    // if Collection element is missing, create it
-                    collection = doc.NewElement("Collection");
-                    vtkFile->InsertEndChild(collection);
-                }
-            }
-        }
     }
 
-    // Add DataSet elements for each MPI rank**
-
-    // Format the current_time with two decimal places
-    std::ostringstream oss;
-    oss << std::fixed << std::setprecision(2) << current_time;
-    std::string t_str = oss.str();
-
     for (int r = 0; r < size; r++) {
-        // create a new DataSet element
         XMLElement* dataSet = doc.NewElement("DataSet");
-        dataSet->SetAttribute("timestep", t_str.c_str());
-        // dataSet->SetAttribute("group", "");
+        dataSet->SetAttribute("timestep", current_time);
         dataSet->SetAttribute("part", r);
-
-        // construct the file reference path
         std::ostringstream fileRef;
         fileRef << r << "/sim." << vs_counter << ".vtp";
         dataSet->SetAttribute("file", fileRef.str().c_str());
-
-        // append the DataSet to the Collection
         collection->InsertEndChild(dataSet);
     }
-
-    // save the pvd
-
-    XMLError saveResult = doc.SaveFile(pvdPath.c_str());
-    if (saveResult != XML_SUCCESS) {
-        std::cerr << "Error saving .pvd file: " << pvdPath << std::endl;
-    }
-}
-
-
-// Save final positions to CSV for the reference run (groundtruth)
-void saveReferenceCSV(const std::string& dir, const std::vector<Position>& pos) {
-    std::ofstream os(dir + "/final_ref.csv");
-    os << "id,x,y,z\n";
-    for (int i = 0; i < static_cast<int>(pos.size()); ++i) {
-        os << i << "," << pos[i].x << "," << pos[i].y << "," << pos[i].z << "\n";
-    }
-}
-
-// Load final reference positions from CSV
-std::vector<Position> loadReferenceCSV(const std::string& dir, int num_bodies) {
-    std::ifstream is(dir + "/final_ref.csv");
-    if (!is.is_open()) {
-        throw std::runtime_error("could not open reference CSV.");
-    }
-
-    std::string line;
-    std::getline(is, line); // skip header
-
-    std::vector<Position> pos(num_bodies);
-    while (std::getline(is, line)) {
-        std::istringstream ss(line);
-        int id; char comma;
-        double x, y, z;
-        ss >> id >> comma >> x >> comma >> y >> comma >> z;
-        pos[id] = {x, y, z};
-    }
-    return pos;
+    doc.SaveFile(pvdPath.c_str());
 }
 
 
 
-// Sum Euclidean distance between corresponding points in a and b
-double computeDistanceSum(const std::vector<Position>& a,
-                          const std::vector<Position>& b) {
-    double sum = 0.0;
-    for (size_t i = 0; i < a.size(); ++i) {
-        double dx = a[i].x - b[i].x;
-        double dy = a[i].y - b[i].y;
-        double dz = a[i].z - b[i].z;
-        sum += std::sqrt(dx*dx + dy*dy + dz*dz);
-    }
-    return sum;
-}
+// bool readCSV(
+//     const std::string& filename,
+//     std::vector<uint64_t>& ids,
+//     std::vector<double>& masses,
+//     std::vector<Position>& positions,
+//     std::vector<Velocity>& velocities,
+//     int body_count)
+// {
+//     std::ifstream file(filename);
+//     if (!file.is_open()) {
+//         std::cerr << "Error: Could not open file " << filename << std::endl;
+//         return false;
+//     }
+
+//     // 1. Read the header line to map column names to indices
+//     std::string header_line;
+//     if (!std::getline(file, header_line)) {
+//         std::cerr << "Error: CSV file is empty or cannot be read." << std::endl;
+//         return false;
+//     }
+//     std::stringstream header_ss(header_line);
+//     std::string header;
+//     std::unordered_map<std::string, int> column_map;
+//     int col_idx = 0;
+//     while (std::getline(header_ss, header, ',')) {
+//         // Trim whitespace/carriage returns
+//         header.erase(header.find_last_not_of(" \n\r\t")+1);
+//         column_map[header] = col_idx++;
+//     }
+
+//     // 2. Validate that all required headers are present
+//     std::vector<std::string> required_headers = {
+//         "mass", "pos_x", "pos_y", "pos_z", "vel_x", "vel_y", "vel_z"
+//     };
+//     for (const auto& req : required_headers) {
+//         if (column_map.find(req) == column_map.end()) {
+//             std::cerr << "Error: Missing required header in CSV file: " << req << std::endl;
+//             return false;
+//         }
+//     }
+
+//     // Clear output vectors
+//     ids.clear();
+//     masses.clear();
+//     positions.clear();
+//     velocities.clear();
+
+//     // 3. Read data rows using the header map
+//     std::string line;
+//     uint64_t current_id = 0;
+//     int bodies_read = 0;
+//     while (std::getline(file, line)) {
+//         if (body_count > 0 && bodies_read >= body_count) {
+//             break;
+//         }
+
+//         std::stringstream line_ss(line);
+//         std::string field;
+//         std::vector<std::string> fields;
+//         while (std::getline(line_ss, field, ',')) {
+//             fields.push_back(field);
+//         }
+
+//         if (fields.size() < column_map.size()) continue; // Skip malformed lines
+
+//         try {
+//             // Access data using the map, not by fixed order
+//             double m  = std::stod(fields.at(column_map.at("mass")));
+//             double px = std::stod(fields.at(column_map.at("pos_x")));
+//             double py = std::stod(fields.at(column_map.at("pos_y")));
+//             double pz = std::stod(fields.at(column_map.at("pos_z")));
+//             double vx = std::stod(fields.at(column_map.at("vel_x")));
+//             double vy = std::stod(fields.at(column_map.at("vel_y")));
+//             double vz = std::stod(fields.at(column_map.at("vel_z")));
+
+//             // Store the parsed values
+//             masses.push_back(m);
+//             positions.push_back({px, py, pz});
+//             velocities.push_back({vx, vy, vz});
+
+//             // Generate a persistent ID
+//             ids.push_back(current_id++);
+//             bodies_read++;
+
+//         } catch (const std::exception& e) {
+//             std::cerr << "Warning: Could not parse line, skipping: \"" << line << "\"\n";
+//         }
+//     }
+//     return true;
+// }

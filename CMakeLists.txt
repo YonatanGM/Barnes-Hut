@@ -1,10 +1,12 @@
 cmake_minimum_required(VERSION 3.16.3)
 project(ParallelNBodySimulation VERSION 1.0 LANGUAGES CXX)
 
-# default to Release build if not specified
+
+# Default to a Release build for performance if not specified.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build" FORCE)
 endif()
+
 
 # macOS OpenMP flags
 if(APPLE)
@@ -19,13 +21,14 @@ endif()
 
 # core library
 add_library(solar_system_lib STATIC
-  src/octree.cpp
-  src/barnes_hut.cpp
-  src/integration.cpp
+  src/linear_octree.cpp
+  src/morton_keys.cpp
+  src/load_balancing.cpp
+  src/exchange.cpp
   src/io.cpp
-  src/kepler_to_cartesian.cpp
   src/tinyxml2.cpp
 )
+
 target_compile_features(solar_system_lib PUBLIC cxx_std_17)
 target_include_directories(solar_system_lib PUBLIC include)
 target_compile_options(solar_system_lib PUBLIC
@@ -45,22 +48,9 @@ target_link_libraries(solar_system_lib PUBLIC MPI::MPI_CXX)
 add_executable(simulate src/main.cpp)
 target_link_libraries(simulate PRIVATE solar_system_lib)
 
-# test and coverage options
-option(WITH_TESTS      "Build and run unit tests"      ON)
-option(ENABLE_COVERAGE "Enable code coverage reporting" OFF)
 
-# coverage setup (forces Debug build)
-if(ENABLE_COVERAGE)
-  message(STATUS "Coverage enabled — forcing Debug + coverage flags")
-  set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "" FORCE)
-  include(${CMAKE_SOURCE_DIR}/test/CodeCoverage.cmake)
-  APPEND_COVERAGE_COMPILER_FLAGS()
-endif()
-
-# tests
-if(WITH_TESTS)
-  enable_testing()
-  add_subdirectory(test)
-endif()
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER_ID}")
+message(STATUS "Configured")
 
 

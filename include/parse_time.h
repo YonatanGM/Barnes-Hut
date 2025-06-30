@@ -1,5 +1,4 @@
-#ifndef PARSE_TIME_H
-#define PARSE_TIME_H
+#pragma once
 #include <iostream>
 #include <string>
 
@@ -15,7 +14,3 @@ double parseTime(const std::string& timeStr) {
             throw std::invalid_argument("unknown time unit: " + timeStr);
     }
 }
-
-
-
-#endif 

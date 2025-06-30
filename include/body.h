@@ -1,31 +1,21 @@
-#ifndef BODY_H
-#define BODY_H
+#pragma once
+#include <limits>
 
-/**
- * @brief Structure representing a body's position.
- */
-struct Position {
-    double x;
-    double y;
-    double z;
+// Basic 3D vector for position, velocity, and acceleration
+struct Vec3 {
+    double x, y, z;
 };
 
-/**
- * @brief Structure representing a body's velocity.
- */
-struct Velocity {
-    double vx;
-    double vy;
-    double vz;
-};
+using Position = Vec3;
+using Velocity = Vec3;
+using Acceleration = Vec3;
 
-/**
- * @brief Structure representing a body's acceleration.
- */
-struct Acceleration {
-    double ax;
-    double ay;
-    double az;
-};
 
-#endif // BODY_H
+struct BoundingBox {
+    Position min{ std::numeric_limits<double>::infinity(),
+                  std::numeric_limits<double>::infinity(),
+                  std::numeric_limits<double>::infinity() };
+    Position max{ -std::numeric_limits<double>::infinity(),
+                  -std::numeric_limits<double>::infinity(),
+                  -std::numeric_limits<double>::infinity() };
+};

@@ -1,370 +1,212 @@
-#include <iostream>
-#include <vector>
-#include <string>
 #include <mpi.h>
 #include <omp.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+#include <numeric>
+#include <string>
+#include <utility>
+#include <vector>
 #include <filesystem>
-#include <cstddef> // for offsetof
-#include <cmath>
-#include <sstream>
-#include <iomanip>
+
+
+#include "cxxopts.hpp"
+#include "parse_time.h"
 #include "body.h"
 #include "io.h"
-#include "barnes_hut.h"
-#include "integration.h"
-#include "cxxopts.hpp"
-#include "logger.h"
-#include "tinyxml2.h"
-#include "parse_time.h"
-
-namespace fs = std::filesystem;
+#include "morton_keys.h"
+#include "linear_octree.h"
+#include "load_balancing.h"
+#include "exchange.h"
+#include "traversal.h"
+#include "policy.h"
 
 
-int main(int argc, char* argv[]) {
+
+// Forward declarations of MPI datatypes
+MPI_Datatype MPI_POSITION, MPI_VELOCITY, MPI_ACCELERATION, MPI_NODE, MPI_ID;
+
+int main(int argc, char **argv) {
     int provided;
-
-    // initialize mpi with thread support
-    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
-
-    // check the level of thread support provided
-    if (provided < MPI_THREAD_FUNNELED) {
-        std::cerr << "mpi does not provide the required threading level" << std::endl;
-        MPI_Abort(MPI_COMM_WORLD, 1);
-    }
-
-    auto total_start = MPI_Wtime(); // start timing the total process
-
-    // custom mpi type for acceleration, position and velocities
-    MPI_Datatype MPI_VECTOR;
-    MPI_Type_contiguous(3, MPI_DOUBLE, &MPI_VECTOR);
-    MPI_Type_commit(&MPI_VECTOR);
-
-
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
     int rank, size;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank); // get current process rank
-    MPI_Comm_size(MPI_COMM_WORLD, &size); // get total number of processes
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    // default simulation parameters
-    const double G = 1.48812e-34; // gravitational constant in AU^3 kg^-1 day^-2
-    // double softening = 1e-11;     // softening parameter in AU
-    double softening = 0;
-    double theta = 0.5;           // barnes-hut opening angle parameter
-    double dt_val = 1.0;          // time step in days
-    double t_end_val = 365.25;    // end time in days (default 1 year)
-    double vs_val = 1.0;          // visualization step in days
-    std::string vs_dir = "sim";   // output directory for visualization data
-    std::string filename;         // input filename
+    // CLI parsing
+    cxxopts::Options opt(argv[0], "Phase‑2 Barnes–Hut");
+    opt.add_options()
+        ("f,file",    "CSV file (mass,x,y,z,vx,vy,vz)",   cxxopts::value<std::string>())
+        ("dt",        "Time step",                       cxxopts::value<std::string>()->default_value("1d"))
+        ("tend",      "End time",                       cxxopts::value<std::string>()->default_value("1y"))
+        ("vs",        "Visualization step interval", cxxopts::value<std::string>()->default_value("10d"))
+        ("o,outdir",  "Output directory for visualization", cxxopts::value<std::string>()->default_value("sim_out"))
+        ("b,bodies",  "number of bodies to simulate", cxxopts::value<int>()->default_value("-1"))
+        // ("lb",        "Load balance policy: hist256",   cxxopts::value<std::string>()->default_value("hist256"))
+        ("fc",        "Force calculation: tree|let",    cxxopts::value<std::string>()->default_value("tree"))
+        ("theta",     "BH opening angle",               cxxopts::value<double>()->default_value("0.5"));
+    const auto args = opt.parse(argc, argv);
 
-    std::string dt_str;
-    std::string t_end_str;
-    std::string vs_str;
-    int body_count = -1; // use all bodies if not provided
+    const double dt    = parseTime(args["dt"].as<std::string>());
+    const double t_end = parseTime(args["tend"].as<std::string>());
+    const double vs_interval = parseTime(args["vs"].as<std::string>());
+    const std::string out_dir = args["outdir"].as<std::string>();
+    const double theta = args["theta"].as<double>();
+    const int nbodies = args["bodies"].as<int>();
 
-    bool is_reference=false;
-    std::string ref_dir;
-    double summed_dist_error = 0.0; // accumulated error
-    //  ("s,softening", "softening parameter", cxxopts::value<double>()->default_value("1e-11"))
-    try {
-        // set up command-line options using cxxopts
-        cxxopts::Options options(argv[0], "n-body simulation with mpi & barnes-hut");
-        options.add_options()
-            // define command-line options
-            ("f,file", "input file", cxxopts::value<std::string>())
-            ("d,dt", "time step (e.g., 1d)", cxxopts::value<std::string>()->default_value("1d"))
-            ("t,t_end", "end time (e.g., 1y)", cxxopts::value<std::string>()->default_value("1y"))
-            ("v,vs", "visualization step", cxxopts::value<std::string>()->default_value("1d"))
-            ("o,vs_dir", "output directory", cxxopts::value<std::string>()->default_value("sim"))
-            ("theta", "barnes-hut parameter", cxxopts::value<double>()->default_value("0.5"))
-            ("s,softening", "softening parameter", cxxopts::value<double>()->default_value("0"))
-            ("b,bodies", "number of bodies to simulate", cxxopts::value<int>()->default_value("-1"))
-            ("l,log", "enable logging", cxxopts::value<bool>()->default_value("true")->implicit_value("true"))
-            ("r,reference", "run as reference (ground truth)", cxxopts::value<bool>()->default_value("false"))
-            ("h,help", "show usage");
+    // LBPolicy lbPol = LBPolicy::Hist256;
+    FCPolicy fcPol = (args["fc"].as<std::string>() == "let") ? FCPolicy::LET : FCPolicy::Tree;
 
-        // parse the cmd arguments
-        auto result = options.parse(argc, argv);
-
-        // if help is requested, display usage and exit
-        if (result.count("help")) {
-            if (rank == 0) std::cout << options.help() << std::endl;
-            MPI_Finalize();
-            return 0;
-        }
-
-        // required file
-        if (!result.count("file")) {
-            throw std::invalid_argument("input file not specified; use --file <filename>");
-        }
-
-        logging_enabled = result["log"].as<bool>();
-        filename    = result["file"].as<std::string>();
-        dt_str = result["dt"].as<std::string>();
-        t_end_str = result["t_end"].as<std::string>();
-        vs_str = result["vs"].as<std::string>();
-        vs_dir = result["vs_dir"].as<std::string>();
-        theta = result["theta"].as<double>();
-        softening = result["softening"].as<double>();
-        body_count = result["bodies"].as<int>();
-
-        dt_val = parseTime(dt_str);
-        t_end_val = parseTime(t_end_str);
-        vs_val = parseTime(vs_str);
-
-        // reference
-        is_reference = result["reference"].as<bool>();
-        ref_dir = fs::path(vs_dir) / "reference";
-
-
-        // enforce reference runs use θ <= 0.01
-        if (is_reference && theta > 0.1) {
-            throw std::invalid_argument(
-            "reference run requires theta <= 0.1 (you used theta=" + std::to_string(theta) + ")");
-        }
-
-        // validate parameters
-        if (dt_val <= 0 || t_end_val <= 0 || vs_val <= 0 || theta <= 0 || softening < 0) {
-            throw std::invalid_argument("invalid parameters.");
-        }
-
-    } catch (const std::exception& e) {
-        // report on rank 0, then abort all ranks
-        if (rank == 0) std::cerr << "error: " << e.what() << "\n";
-        MPI_Abort(MPI_COMM_WORLD, 1);
-    }
-
-    // log simulation parameters
-    LOG(0, "input file: " << filename);
-    LOG(0,
-        "dt: "     << dt_str    << ", "
-      << "t_end: "  << t_end_str << ", "
-      << "vs: "     << vs_str    << ", "
-      << "vs_dir: " << vs_dir    << ", "
-      << "theta: "  << theta
-    );
-
-    // log the number of threads available
-    LOG(rank, "threads available: " << omp_get_max_threads());
-
-    // create directories
-    if (rank == 0) {
-        fs::create_directories(vs_dir);
-    }
-    if (rank == 0 && is_reference) {
-        fs::create_directories(ref_dir);
-    }
-
-    std::vector<double> masses;            // vector to store masses of bodies
-    std::vector<Position> positions;       // vector to store positions of bodies
-    std::vector<Velocity> velocities;      // vector to store velocities of bodies
-    std::vector<std::string> names;        // vector to store names of bodies
-    std::vector<int> orbit_classes;        // vector to store orbit classes
-
-    int num_bodies = 0; // total number of bodies
+    // Load data on rank 0 then scatter
+    std::vector<Position>  init_pos;
+    std::vector<Velocity>  init_vel;
+    std::vector<double>    init_mass;
+    std::vector<uint64_t>  init_ids;
 
     if (rank == 0) {
-        // read csv and limit the number of bodies if specified
-        if (!readCSV(filename, masses, positions, velocities, names, orbit_classes, body_count)) {
-            std::cerr << "error: could not read file: " << filename << std::endl;
+        if (!args.count("file")) {
+            std::cerr << "Error: input file required (-f)\n";
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
-        num_bodies = (int)masses.size(); // get the actual number of bodies read
-
-        LOG(0, "loaded " << num_bodies << " bodies" << ((body_count > 0 && body_count < num_bodies) ? " (truncated)" : "") << ".");
+        if (!readCSV(args["file"].as<std::string>(), init_ids, init_mass, init_pos, init_vel, nbodies))
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        std::cout << "Loaded " << init_mass.size() << " bodies\n";
+        std::filesystem::create_directories(out_dir); // Create output dir
     }
 
-     // construct pvd filename including body count
-    std::string input_stem = fs::path(filename).stem().string();
-    std::string pvdFilename = "sim_" + input_stem + "_dt" + dt_str + "_tend" + t_end_str + "_vs" + vs_str + "_bodies" + std::to_string(num_bodies) + ".pvd";
+    // Broadcast total N
+    int N_total = static_cast<int>(init_mass.size());
+    MPI_Bcast(&N_total, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    // broadcast the number of bodies to all processes
-    MPI_Bcast(&num_bodies, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-    // resize vectors on other processes based on the number of bodies
-    if (rank != 0) {
-        masses.resize(num_bodies);
-        positions.resize(num_bodies);
-        velocities.resize(num_bodies);
-        names.resize(num_bodies);
-        orbit_classes.resize(num_bodies);
+    std::vector<int> counts(size), displs(size);
+    int base = N_total / size, rem = N_total % size;
+    for (int i = 0; i < size; ++i) {
+        counts[i] = base + (i < rem);
+        displs[i] = (i == 0) ? 0 : displs[i - 1] + counts[i - 1];
     }
 
-    // broadcast masses and positions to all processes
-    MPI_Bcast(masses.data(), num_bodies, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Bcast(positions.data(), num_bodies, MPI_VECTOR, 0, MPI_COMM_WORLD);
+    std::vector<Position>  local_pos(counts[rank]);
+    std::vector<Velocity>  local_vel(counts[rank]);
+    std::vector<double>    local_mass(counts[rank]);
+    std::vector<uint64_t>  local_ids(counts[rank]);
 
-    // determine the number of bodies per process
-    int bodies_per_proc = num_bodies / size; // base number of bodies per process
-    int remainder = num_bodies % size;       // extra bodies to distribute
+    // MPI datatypes 
+    MPI_Type_contiguous(3, MPI_DOUBLE, &MPI_POSITION);  MPI_Type_commit(&MPI_POSITION);
+    MPI_Type_contiguous(3, MPI_DOUBLE, &MPI_VELOCITY);  MPI_Type_commit(&MPI_VELOCITY);
+    MPI_Type_contiguous(3, MPI_DOUBLE, &MPI_ACCELERATION); MPI_Type_commit(&MPI_ACCELERATION);
+    MPI_Type_contiguous(1, MPI_UINT64_T, &MPI_ID);      MPI_Type_commit(&MPI_ID);
 
-    std::vector<int> sendcounts(size), displs(size, 0);
-    {
-        int offset = 0;
-        for (int i = 0; i < size; i++) {
-            sendcounts[i] = bodies_per_proc + (i < remainder ? 1 : 0);
-            displs[i] = offset;
-            offset += sendcounts[i];
-        }
-    }
+    int blk[3]   = {1, 1, 4};
+    MPI_Aint dsp[3] = {offsetof(NodeRecord, prefix), offsetof(NodeRecord, depth), offsetof(NodeRecord, mass)};
+    MPI_Datatype typ[3] = {MPI_UINT64_T,
+                           MPI_UNSIGNED_CHAR, 
+                           MPI_DOUBLE};
+    MPI_Type_create_struct(3, blk, dsp, typ, &MPI_NODE); MPI_Type_commit(&MPI_NODE);
 
-    int local_n = sendcounts[rank]; // number of bodies for this process
-
-    // prepare to scatter names
-    int max_name_len = 0;
-    if (rank == 0) {
-        for (auto &nm : names) {
-            int len = (int)nm.size();
-            if (len > max_name_len) max_name_len = len;
-        }
-    }
-
-    MPI_Bcast(&max_name_len, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-    int chunk_size = max_name_len + 1; // allocate extra space for null terminator
-    std::vector<char> all_names_buffer;
-    std::vector<int> name_sendcounts(size), name_displs(size, 0);
-    if (rank == 0) {
-        all_names_buffer.resize(num_bodies * chunk_size);
-        for (int i = 0; i < num_bodies; i++) {
-            std::string &nm = names[i];
-            int len = (int)nm.size();
-            if (len > max_name_len) len = max_name_len;
-            std::memcpy(&all_names_buffer[i * chunk_size], nm.c_str(), len);
-            for (int c = len; c < chunk_size; c++) {
-                all_names_buffer[i * chunk_size + c] = '\0';
-            }
-        }
-
-        for (int i = 0; i < size; i++) {
-            name_sendcounts[i] = sendcounts[i] * chunk_size;
-        }
-
-        int off = 0;
-        for (int i = 0; i < size; i++) {
-            name_displs[i] = off;
-            off += name_sendcounts[i];
-        }
-    }
-
-    std::vector<char> local_name_buffer(local_n * chunk_size);
-    MPI_Scatterv(all_names_buffer.data(), name_sendcounts.data(), name_displs.data(), MPI_CHAR,
-                 local_name_buffer.data(), local_n * chunk_size, MPI_CHAR,
+    // Scatter initial data
+    MPI_Scatterv(init_pos.data(),  counts.data(), displs.data(), MPI_POSITION,
+                 local_pos.data(), counts[rank], nullptr == init_pos.data() ? MPI_DATATYPE_NULL : MPI_POSITION,
+                 0, MPI_COMM_WORLD);
+    MPI_Scatterv(init_vel.data(),  counts.data(), displs.data(), MPI_VELOCITY,
+                 local_vel.data(), counts[rank], nullptr == init_vel.data() ? MPI_DATATYPE_NULL : MPI_VELOCITY,
+                 0, MPI_COMM_WORLD);
+    MPI_Scatterv(init_mass.data(), counts.data(), displs.data(), MPI_DOUBLE,
+                 local_mass.data(), counts[rank], nullptr == init_mass.data() ? MPI_DATATYPE_NULL : MPI_DOUBLE,
                  0, MPI_COMM_WORLD);
 
-    std::vector<std::string> local_names(local_n);
-    for (int i = 0; i < local_n; i++) {
-        local_names[i] = std::string(&local_name_buffer[i * chunk_size]);
-    }
+    MPI_Scatterv(init_ids.data(),  counts.data(), displs.data(), MPI_ID,
+                local_ids.data(), counts[rank], (nullptr == init_ids.data() ? MPI_DATATYPE_NULL : MPI_ID),
+                0, MPI_COMM_WORLD);
 
-    // local data for each process
-    std::vector<double> local_masses(local_n);
-    std::vector<Position> local_positions(local_n);
-    std::vector<Velocity> local_velocities(local_n);
-    std::vector<int> local_orbit_classes(local_n);
+    // Main loop
+    const double G = 1.48812e-34;
+    std::vector<Acceleration> local_acc(local_pos.size());
+    double next_vis_time = 0.0;
+    int vis_step = 0;
+    double t = 0.0;
 
-    // scatter masses to all processes
-    MPI_Scatterv(masses.data(), sendcounts.data(), displs.data(), MPI_DOUBLE,
-                 local_masses.data(), local_n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-    // Scatter positions
-    MPI_Scatterv(positions.data(), sendcounts.data(), displs.data(), MPI_VECTOR,
-                local_positions.data(), local_n, MPI_VECTOR, 0, MPI_COMM_WORLD);
-
-    // Scatter velocities
-    MPI_Scatterv(velocities.data(), sendcounts.data(), displs.data(), MPI_VECTOR,
-                local_velocities.data(), local_n, MPI_VECTOR, 0, MPI_COMM_WORLD);
-
-    // scatter orbit_classes to all processes
-    MPI_Scatterv(orbit_classes.data(), sendcounts.data(), displs.data(), MPI_INT,
-                 local_orbit_classes.data(), local_n, MPI_INT, 0, MPI_COMM_WORLD);
-
-    LOG(rank, "received " << local_n << " bodies starting at index " << displs[rank]);
+    if (rank == 0)
+        std::cout << "Starting simulation (dt=" << dt << ", tend=" << t_end << ")\n";
 
 
-    double t = 0.0;      // current simulation time in days
-    int step = 0;        // simulation step counter
-    int vs_counter = 0;  // visualization counter
-
-    // compute initial accelerations
-    std::vector<Acceleration> local_accelerations(local_n);
-    computeAccelerations(masses, positions, local_masses, local_positions, local_accelerations, G, theta, softening);
-
-    // simulation loop
-    while (t < t_end_val) {
-        // perform leapfrog integration, update positions and half-step velocities
-        leapfrogIntegration(local_positions, local_velocities, local_accelerations, dt_val);
-
-        // advance simulation time
-        t += dt_val;
-        step++;
-
-        // gather updated positions from all processes for next acceleration calculation
-        MPI_Allgatherv(local_positions.data(), local_n, MPI_VECTOR,
-                    positions.data(), sendcounts.data(), displs.data(), MPI_VECTOR,
-                    MPI_COMM_WORLD);
-
-        // compute new accelerations based on updated positions
-        computeAccelerations(masses, positions, local_masses, local_positions, local_accelerations, G, theta, softening);
-
-        // update velocities by another half step using new accelerations
-        #pragma omp parallel for
-        for (int i = 0; i < local_n; i++) {
-            local_velocities[i].vx += local_accelerations[i].ax * dt_val * 0.5;
-            local_velocities[i].vy += local_accelerations[i].ay * dt_val * 0.5;
-            local_velocities[i].vz += local_accelerations[i].az * dt_val * 0.5;
+    for (int step = 0; t < t_end; ++step, t += dt) {
+        // 1. Half‑kick (initial accel known from previous loop or assumed zero)
+        if (t > 0) {
+            for (size_t i = 0; i < local_pos.size(); ++i) {
+                local_vel[i].x += 0.5 * dt * local_acc[i].x;
+                local_vel[i].y += 0.5 * dt * local_acc[i].y;
+                local_vel[i].z += 0.5 * dt * local_acc[i].z;
+            }
         }
 
-        // check if it's time to save visualization data
-        if (t >= vs_counter * vs_val) {
+        // 2. Drift
+        for (size_t i = 0; i < local_pos.size(); ++i) {
+            local_pos[i].x += dt * local_vel[i].x;
+            local_pos[i].y += dt * local_vel[i].y;
+            local_pos[i].z += dt * local_vel[i].z;
+        }
 
-            // compute global energies
-            double kinetic_energy = 0.0, potential_energy = 0.0, total_energy = 0.0, virial_equilibrium = 0.0;
-            computeGlobalEnergiesParallel(masses, positions, local_velocities, G,
-                                        rank, size, displs, sendcounts, local_n,
-                                        kinetic_energy, potential_energy, total_energy, virial_equilibrium);
+        // 3. Load balance (every step for now)
+        BoundingBox global_bb;
+        CodesAndNorm cn = rebalance_bodies(rank, size, local_pos, local_mass, local_vel, local_ids, global_bb);
 
-            int body_id_offset = displs[rank];
-            // write the current state to vtp file
-            writeVTPFile(rank, vs_counter,
-                         local_masses, local_positions, local_velocities,
-                         local_accelerations, local_names, local_orbit_classes,
-                         body_id_offset,
-                         kinetic_energy, potential_energy, total_energy, virial_equilibrium,
-                         vs_dir);
+        // 4. Build local tree
+        OctreeMap my_tree = buildOctree2(cn.code, local_pos, local_mass);
+
+        // 5. Exchange trees (placeholder)
+        OctreeMap full_tree;
+        switch (fcPol) {
+            case FCPolicy::Tree:
+                exchange_whole_trees(my_tree, full_tree, MPI_NODE, rank, size);
+                break;
+            case FCPolicy::LET:
+                if (rank == 0)
+                    std::cout << "LET exchange not yet implemented – falling back" << std::endl;
+                exchange_whole_trees(my_tree, full_tree, MPI_NODE, rank, size);
+                break;
+            default:
+                MPI_Abort(MPI_COMM_WORLD, 999);
+        }
+
+        // 6. Compute new accelerations
+        local_acc.resize(local_pos.size());
+        bhAccelerations(full_tree, cn.code,  local_pos, theta, G, 0.0, local_acc);
+
+        // 7. Second half‑kick
+        for (size_t i = 0; i < local_pos.size(); ++i) {
+            local_vel[i].x += 0.5 * dt * local_acc[i].x;
+            local_vel[i].y += 0.5 * dt * local_acc[i].y;
+            local_vel[i].z += 0.5 * dt * local_acc[i].z;
+        }
+        // 8. Visualization
+        if (t >= next_vis_time || step == 0) {
+            writeSnapshot(rank, vis_step, local_ids, local_mass,
+                        local_pos, local_vel, local_acc, out_dir);
 
             MPI_Barrier(MPI_COMM_WORLD);
-            // ensure all vtp files are written before updating pvd
 
             if (rank == 0) {
-                // update the pvd file with the new timestep data
-                updatePVDFile(pvdFilename, size, vs_counter, t, vs_dir);
-                LOG(0, "saved state for visualization step " << vs_counter);
-
+                updatePVDFile(args, size, vis_step, t, out_dir);
+                std::cout << "Saved frame " << vis_step << " at t=" << t << std::endl;
             }
-
-            vs_counter++;
+            next_vis_time += vs_interval;
+            vis_step++;
         }
     }
 
-    LOG(0, "completed.");
+    if (rank == 0) std::cout << "Simulation finished.\n";
 
-    if (rank == 0) {
-        if (is_reference) {
-            saveReferenceCSV(ref_dir, positions);
-        } else {
-            try {
-                auto ref_pos = loadReferenceCSV(ref_dir, num_bodies);
-                summed_dist_error = computeDistanceSum(positions, ref_pos);
-            } catch (const std::exception& e) {
-                LOG(0, e.what());
-            }
-        }
-    }
 
-    LOG(0, "TOTAL_TIME: " << MPI_Wtime() - total_start);
-    LOG(0, "SUMMED_DIST_ERROR: " << summed_dist_error);
-
-    MPI_Type_free(&MPI_VECTOR);
+    // Cleanup
+    MPI_Type_free(&MPI_ID);
+    MPI_Type_free(&MPI_POSITION);
+    MPI_Type_free(&MPI_VELOCITY);
+    MPI_Type_free(&MPI_ACCELERATION);
+    MPI_Type_free(&MPI_NODE);
     MPI_Finalize();
-
     return 0;
 }
+
