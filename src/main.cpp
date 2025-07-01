@@ -107,19 +107,10 @@ int main(int argc, char **argv) {
     MPI_Type_create_struct(3, blk, dsp, typ, &MPI_NODE); MPI_Type_commit(&MPI_NODE);
 
     // Scatter initial data
-    MPI_Scatterv(init_pos.data(),  counts.data(), displs.data(), MPI_POSITION,
-                 local_pos.data(), counts[rank], nullptr == init_pos.data() ? MPI_DATATYPE_NULL : MPI_POSITION,
-                 0, MPI_COMM_WORLD);
-    MPI_Scatterv(init_vel.data(),  counts.data(), displs.data(), MPI_VELOCITY,
-                 local_vel.data(), counts[rank], nullptr == init_vel.data() ? MPI_DATATYPE_NULL : MPI_VELOCITY,
-                 0, MPI_COMM_WORLD);
-    MPI_Scatterv(init_mass.data(), counts.data(), displs.data(), MPI_DOUBLE,
-                 local_mass.data(), counts[rank], nullptr == init_mass.data() ? MPI_DATATYPE_NULL : MPI_DOUBLE,
-                 0, MPI_COMM_WORLD);
-
-    MPI_Scatterv(init_ids.data(),  counts.data(), displs.data(), MPI_ID,
-                local_ids.data(), counts[rank], (nullptr == init_ids.data() ? MPI_DATATYPE_NULL : MPI_ID),
-                0, MPI_COMM_WORLD);
+    MPI_Scatterv(init_pos.data(), counts.data(), displs.data(), MPI_POSITION, local_pos.data(), counts[rank], MPI_POSITION, 0, MPI_COMM_WORLD);
+    MPI_Scatterv(init_vel.data(), counts.data(), displs.data(), MPI_VELOCITY, local_vel.data(), counts[rank], MPI_VELOCITY, 0, MPI_COMM_WORLD);
+    MPI_Scatterv(init_mass.data(), counts.data(), displs.data(), MPI_DOUBLE, local_mass.data(), counts[rank], MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Scatterv(init_ids .data(), counts.data(), displs.data(), MPI_ID,     local_ids .data(), counts[rank], MPI_ID,     0, MPI_COMM_WORLD);
 
     // Main loop
     const double G = 1.48812e-34;
@@ -173,7 +164,7 @@ int main(int argc, char **argv) {
 
         // 6. Compute new accelerations
         local_acc.resize(local_pos.size());
-        bhAccelerations(full_tree, cn.code,  local_pos, theta, G, 0.0, local_acc);
+        bhAccelerations(full_tree, cn.code,  local_pos, theta, G, 0.0, global_bb, local_acc);
 
         // 7. Second half‑kick
         for (size_t i = 0; i < local_pos.size(); ++i) {
