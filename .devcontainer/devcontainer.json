@@ -1,0 +1,7 @@
+{
+  "name": "nbody-dev",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "runArgs": ["--network=host"]
+}
