@@ -4,42 +4,19 @@
 #include <cassert>
 
 
-CodesAndNorm rebalance_bodies(
+void rebalance_bodies(
     int rank, int size,
+    const CodesAndNorm &cn,
     std::vector<Position> &local_pos,
     std::vector<double> &local_mass,
     std::vector<Velocity> &local_vel,
-    std::vector<uint64_t>  local_ids,
-    BoundingBox& out_global_bb) {
+    std::vector<uint64_t> &local_ids) {
 
     (void)rank;
 
-    constexpr int BUCKET_BITS  = 12;            // 2^12 = 4096 buckets
+    constexpr int BUCKET_BITS  = 18;            // 2^12 = 4096 buckets
     constexpr int NUM_BUCKETS  = 1 << BUCKET_BITS;
 
-    // -------------------------------------------------
-    // Step 1: Global bounding box for key normalisation
-    // -------------------------------------------------
-    BoundingBox local_bb;
-    if (!local_pos.empty()) {
-        for (const auto &p : local_pos) {
-            local_bb.min.x = std::min(local_bb.min.x, p.x);
-            local_bb.min.y = std::min(local_bb.min.y, p.y);
-            local_bb.min.z = std::min(local_bb.min.z, p.z);
-            local_bb.max.x = std::max(local_bb.max.x, p.x);
-            local_bb.max.y = std::max(local_bb.max.y, p.y);
-            local_bb.max.z = std::max(local_bb.max.z, p.z);
-        }
-    }
-    // ranks with 0 bodies keep ±inf (safe for MIN/MAX reductions)
-
-    MPI_Allreduce(&local_bb.min, &out_global_bb.min, 3, MPI_DOUBLE, MPI_MIN,
-                  MPI_COMM_WORLD);
-    MPI_Allreduce(&local_bb.max, &out_global_bb.max, 3, MPI_DOUBLE, MPI_MAX,
-                  MPI_COMM_WORLD);
-
-    // recompute Morton keys with this global box
-    CodesAndNorm cn = mortonCodes(local_pos, out_global_bb);
 
     // Step 2: build local histogram & reduce to global
     std::vector<long long> local_hist(NUM_BUCKETS, 0);
@@ -112,10 +89,10 @@ CodesAndNorm rebalance_bodies(
     local_pos.resize(total_recv);
     local_mass.resize(total_recv);
     local_vel.resize(total_recv);
-    local_ids.resize(total_recv); 
+    local_ids.resize(total_recv);
 
     // Convenience type handles
-    extern MPI_Datatype MPI_POSITION, MPI_VELOCITY, MPI_ID; 
+    extern MPI_Datatype MPI_POSITION, MPI_VELOCITY, MPI_ID;
 
     MPI_Alltoallv(pos_send.data(),  send_counts.data(), sdispls.data(), MPI_POSITION,
                   local_pos.data(), recv_counts.data(), rdispls.data(), MPI_POSITION,
@@ -130,30 +107,32 @@ CodesAndNorm rebalance_bodies(
                 local_ids.data(), recv_counts.data(), rdispls.data(), MPI_ID, MPI_COMM_WORLD);
 
     // Recompute codes for the new local particles, then sort everything
-    // tree building stage needs the data in sorted order 
-    CodesAndNorm final_cn = mortonCodes(local_pos, out_global_bb);
-    
-    std::vector<size_t> sort_idx(total_recv);
-    std::iota(sort_idx.begin(), sort_idx.end(), 0);
-    std::sort(sort_idx.begin(), sort_idx.end(), [&](size_t a, size_t b) {
-        return final_cn.code[a] < final_cn.code[b];
-    });
+    // tree building stage needs the data in sorted order
+    // CodesAndNorm final_cn = mortonCodes(local_pos, global_bb);
 
-    auto permute = [&](auto &vec) {
-        std::vector<std::decay_t<decltype(vec[0])>> tmp(vec.size());
-        for (size_t i = 0; i < vec.size(); ++i) tmp[i] = vec[sort_idx[i]];
-        vec.swap(tmp);
-    };
+    // std::vector<size_t> sort_idx(total_recv);
+    // std::iota(sort_idx.begin(), sort_idx.end(), 0);
+    // std::sort(sort_idx.begin(), sort_idx.end(), [&](size_t a, size_t b) {
+    //     return final_cn.code[a] < final_cn.code[b];
+    // });
 
-    permute(local_pos);
-    permute(local_mass);
-    permute(local_vel);
-    permute(local_ids); 
-    permute(final_cn.code);
-    permute(final_cn.norm);
+    // auto permute = [&](auto &vec) {
+    //     std::vector<std::decay_t<decltype(vec[0])>> tmp(vec.size());
+    //     for (size_t i = 0; i < vec.size(); ++i) tmp[i] = vec[sort_idx[i]];
+    //     vec.swap(tmp);
+    // };
 
-    return final_cn;
+    // permute(local_pos);
+    // permute(local_mass);
+    // permute(local_vel);
+    // permute(local_ids);
+    // permute(final_cn.code);
+    // permute(final_cn.norm);
+
+    // return final_cn;
 }
+
+
 
 // static int rootOctant(const Position&p,const BBox&b){
 //     int xi=p.x>=0.5*(b.xmin+b.xmax);

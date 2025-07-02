@@ -8,7 +8,7 @@
 #include <cstring>
 #include <unordered_map>
 #include <filesystem>
-#include "tinyxml2.h" 
+#include "tinyxml2.h"
 
 
 bool readCSV(
@@ -35,7 +35,7 @@ bool readCSV(
     // Skip the header line of the CSV file
     std::getline(file, line);
 
-    uint64_t current_id = 0; 
+    uint64_t current_id = 0;
 
     while (std::getline(file, line)) {
         // Stop if the desired number of bodies has been read
@@ -45,7 +45,7 @@ bool readCSV(
 
         std::stringstream ss(line);
         std::string field;
-        
+
         try {
             // Skip unused columns: id, name, class
             std::getline(ss, field, ','); // Skip id
@@ -54,7 +54,7 @@ bool readCSV(
 
             // Read the required data: mass, position, velocity
             double mass, px, py, pz, vx, vy, vz;
-            
+
             std::getline(ss, field, ','); mass = std::stod(field);
             std::getline(ss, field, ','); px = std::stod(field);
             std::getline(ss, field, ','); py = std::stod(field);
@@ -84,7 +84,7 @@ bool readCSV(
  * Adapted from your original writeVTPFile.
  */
 void writeSnapshot(int rank, int vs_counter,
-                   const std::vector<uint64_t>& local_ids,      
+                   const std::vector<uint64_t>& local_ids,
                    const std::vector<double>& local_masses,
                    const std::vector<Position>& local_positions,
                    const std::vector<Velocity>& local_velocities,
@@ -93,11 +93,10 @@ void writeSnapshot(int rank, int vs_counter,
 {
     using namespace tinyxml2;
     namespace fs = std::filesystem;
-    (void)local_accelerations;
+
     int numPoints = static_cast<int>(local_masses.size());
     if (numPoints == 0) return;
 
-    // Create a subdirectory for each rank, just like the original
     fs::path rank_dir = fs::path(vs_dir) / std::to_string(rank);
     fs::create_directories(rank_dir);
     std::string filename = (rank_dir / ("sim." + std::to_string(vs_counter) + ".vtp")).string();
@@ -106,8 +105,6 @@ void writeSnapshot(int rank, int vs_counter,
     XMLElement* vtkFile = doc.NewElement("VTKFile");
     vtkFile->SetAttribute("type", "PolyData");
     vtkFile->SetAttribute("version", "0.1");
-    vtkFile->SetAttribute("byte_order", "LittleEndian");
-    vtkFile->SetAttribute("header_type", "UInt64");
     doc.InsertFirstChild(vtkFile);
 
     XMLElement* polyData = doc.NewElement("PolyData");
@@ -126,6 +123,7 @@ void writeSnapshot(int rank, int vs_counter,
         da->SetAttribute("type", "Float64");
         da->SetAttribute("Name", "position");
         da->SetAttribute("NumberOfComponents", 3);
+        da->SetAttribute("NumberOfTuples", numPoints);
         da->SetAttribute("format", "ascii");
         std::ostringstream ss;
         for (const auto& p : local_positions) {
@@ -140,39 +138,59 @@ void writeSnapshot(int rank, int vs_counter,
         XMLElement* pd = doc.NewElement("PointData");
         piece->InsertEndChild(pd);
 
-        // --- body_id ---
-        XMLElement* da_id = doc.NewElement("DataArray");
-        da_id->SetAttribute("type", "UInt64");
-        da_id->SetAttribute("Name", "body_id");
-        da_id->SetAttribute("format", "ascii");
-        std::ostringstream ss_id;
-        for (auto v : local_ids) ss_id << v << "\n";
-        da_id->InsertEndChild(doc.NewText(ss_id.str().c_str()));
-        pd->InsertEndChild(da_id);
+        // --- Using your exact helper lambda structure ---
 
-        // --- velocity ---
-        XMLElement* da_vel = doc.NewElement("DataArray");
-        da_vel->SetAttribute("type", "Float64");
-        da_vel->SetAttribute("Name", "velocity");
-        da_vel->SetAttribute("NumberOfComponents", 3);
-        da_vel->SetAttribute("format", "ascii");
-        std::ostringstream ss_vel;
-        for (const auto& v : local_velocities) {
-            ss_vel << v.x << " " << v.y << " " << v.z << "\n";
+        auto writeUInt64Array = [&](const char* name, const std::vector<uint64_t>& arr) {
+            XMLElement* da = doc.NewElement("DataArray");
+            da->SetAttribute("type", "UInt64"); // Handles uint64_t
+            da->SetAttribute("Name", name);
+            da->SetAttribute("NumberOfComponents", 1);
+            da->SetAttribute("NumberOfTuples", static_cast<int>(arr.size()));
+            da->SetAttribute("format", "ascii");
+            std::ostringstream ss;
+            for (auto v : arr) ss << v << "\n";
+            da->InsertEndChild(doc.NewText(ss.str().c_str()));
+            pd->InsertEndChild(da);
+        };
+
+        auto writeFloatArray = [&](const char* name, const std::vector<double>& arr, int comps = 1) {
+            XMLElement* da = doc.NewElement("DataArray");
+            da->SetAttribute("type", "Float64");
+            da->SetAttribute("Name", name);
+            da->SetAttribute("NumberOfComponents", comps);
+            da->SetAttribute("NumberOfTuples", static_cast<int>(arr.size()));
+            da->SetAttribute("format", "ascii");
+            std::ostringstream ss;
+            if (comps == 1) {
+                for (auto v : arr) ss << v << "\n";
+            } else {
+                 // This specific logic for velocity is preserved from your original code
+                 for (const auto& v : local_velocities) {
+                     ss << v.x << " " << v.y << " " << v.z << "\n";
+                 }
+            }
+            da->InsertEndChild(doc.NewText(ss.str().c_str()));
+            pd->InsertEndChild(da);
+        };
+
+        // Call the helpers as in your original code
+        writeUInt64Array("body_id", local_ids);
+        writeFloatArray("velocity", {}, 3); // Pass empty vector as payload is handled inside
+        writeFloatArray("mass", local_masses, 1);
+
+        // The logic for acceleration magnitude is preserved
+        {
+            std::vector<double> acc_magnitude(numPoints);
+            for (int i = 0; i < numPoints; i++) {
+                double ax = local_accelerations[i].x;
+                double ay = local_accelerations[i].y;
+                double az = local_accelerations[i].z;
+                acc_magnitude[i] = std::sqrt(ax * ax + ay * ay + az * az);
+            }
+            writeFloatArray("acceleration", acc_magnitude, 1);
         }
-        da_vel->InsertEndChild(doc.NewText(ss_vel.str().c_str()));
-        pd->InsertEndChild(da_vel);
-
-        // --- mass ---
-        XMLElement* da_mass = doc.NewElement("DataArray");
-        da_mass->SetAttribute("type", "Float64");
-        da_mass->SetAttribute("Name", "mass");
-        da_mass->SetAttribute("format", "ascii");
-        std::ostringstream ss_mass;
-        for (auto v : local_masses) ss_mass << v << "\n";
-        da_mass->InsertEndChild(doc.NewText(ss_mass.str().c_str()));
-        pd->InsertEndChild(da_mass);
     }
+
 
     // Verts
     {

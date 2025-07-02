@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <numeric>
@@ -11,6 +10,8 @@
 #include <utility>
 #include <vector>
 #include <filesystem>
+#include <chrono>
+#include <iomanip>
 
 
 #include "cxxopts.hpp"
@@ -22,6 +23,7 @@
 #include "load_balancing.h"
 #include "exchange.h"
 #include "traversal.h"
+#include "utility.h"
 #include "policy.h"
 
 
@@ -47,7 +49,7 @@ int main(int argc, char **argv) {
         ("b,bodies",  "number of bodies to simulate", cxxopts::value<int>()->default_value("-1"))
         // ("lb",        "Load balance policy: hist256",   cxxopts::value<std::string>()->default_value("hist256"))
         ("fc",        "Force calculation: tree|let",    cxxopts::value<std::string>()->default_value("tree"))
-        ("theta",     "BH opening angle",               cxxopts::value<double>()->default_value("0.5"));
+        ("theta",     "BH opening angle",               cxxopts::value<double>()->default_value("1.05"));
     const auto args = opt.parse(argc, argv);
 
     const double dt    = parseTime(args["dt"].as<std::string>());
@@ -93,7 +95,7 @@ int main(int argc, char **argv) {
     std::vector<double>    local_mass(counts[rank]);
     std::vector<uint64_t>  local_ids(counts[rank]);
 
-    // MPI datatypes 
+    // MPI datatypes
     MPI_Type_contiguous(3, MPI_DOUBLE, &MPI_POSITION);  MPI_Type_commit(&MPI_POSITION);
     MPI_Type_contiguous(3, MPI_DOUBLE, &MPI_VELOCITY);  MPI_Type_commit(&MPI_VELOCITY);
     MPI_Type_contiguous(3, MPI_DOUBLE, &MPI_ACCELERATION); MPI_Type_commit(&MPI_ACCELERATION);
@@ -102,7 +104,7 @@ int main(int argc, char **argv) {
     int blk[3]   = {1, 1, 4};
     MPI_Aint dsp[3] = {offsetof(NodeRecord, prefix), offsetof(NodeRecord, depth), offsetof(NodeRecord, mass)};
     MPI_Datatype typ[3] = {MPI_UINT64_T,
-                           MPI_UNSIGNED_CHAR, 
+                           MPI_UNSIGNED_CHAR,
                            MPI_DOUBLE};
     MPI_Type_create_struct(3, blk, dsp, typ, &MPI_NODE); MPI_Type_commit(&MPI_NODE);
 
@@ -118,36 +120,77 @@ int main(int argc, char **argv) {
     double next_vis_time = 0.0;
     int vis_step = 0;
     double t = 0.0;
+    constexpr int REBALANCE_INTERVAL = 32;
+
+    // accumulators (in microseconds)
+    long long agg_halfkick   = 0;
+    long long agg_drift      = 0;
+    long long agg_rebalance  = 0;
+    long long agg_pretree    = 0;
+    long long agg_build      = 0;
+    long long agg_exchange   = 0;
+    long long agg_accel      = 0;
+    long long agg_kick2      = 0;
+    long long agg_viz        = 0;
 
     if (rank == 0)
         std::cout << "Starting simulation (dt=" << dt << ", tend=" << t_end << ")\n";
 
-
     for (int step = 0; t < t_end; ++step, t += dt) {
-        // 1. Half‑kick (initial accel known from previous loop or assumed zero)
+        // 1. Half-kick
+        auto t1_start = std::chrono::high_resolution_clock::now();
         if (t > 0) {
+            #pragma omp parallel for
             for (size_t i = 0; i < local_pos.size(); ++i) {
                 local_vel[i].x += 0.5 * dt * local_acc[i].x;
                 local_vel[i].y += 0.5 * dt * local_acc[i].y;
                 local_vel[i].z += 0.5 * dt * local_acc[i].z;
             }
         }
+        auto t1_end = std::chrono::high_resolution_clock::now();
+        agg_halfkick += std::chrono::duration_cast<std::chrono::microseconds>(t1_end - t1_start).count();
 
         // 2. Drift
+        auto t2_start = std::chrono::high_resolution_clock::now();
+        #pragma omp parallel for
         for (size_t i = 0; i < local_pos.size(); ++i) {
             local_pos[i].x += dt * local_vel[i].x;
             local_pos[i].y += dt * local_vel[i].y;
             local_pos[i].z += dt * local_vel[i].z;
         }
+        auto t2_end = std::chrono::high_resolution_clock::now();
+        agg_drift += std::chrono::duration_cast<std::chrono::microseconds>(t2_end - t2_start).count();
 
-        // 3. Load balance (every step for now)
-        BoundingBox global_bb;
-        CodesAndNorm cn = rebalance_bodies(rank, size, local_pos, local_mass, local_vel, local_ids, global_bb);
+        // 3. Load balance
+        auto t3_start = std::chrono::high_resolution_clock::now();
+        if (step % REBALANCE_INTERVAL == 0) {
+            if (rank == 0) std::cout << "Step " << step << ": Rebalancing particles...\n";
 
-        // 4. Build local tree
-        OctreeMap my_tree = buildOctree2(cn.code, local_pos, local_mass);
+            BoundingBox current_global_bb = compute_global_bbox(local_pos);
+            CodesAndNorm current_cn = mortonCodes(local_pos, current_global_bb);
+            rebalance_bodies(rank, size, current_cn, local_pos, local_mass, local_vel, local_ids);
+        }
+        auto t3_end = std::chrono::high_resolution_clock::now();
+        agg_rebalance += std::chrono::duration_cast<std::chrono::microseconds>(t3_end - t3_start).count();
 
-        // 5. Exchange trees (placeholder)
+        // 4. PREPARE FOR TREE BUILD
+        auto t4_start = std::chrono::high_resolution_clock::now();
+        BoundingBox global_bb = compute_global_bbox(local_pos);
+        CodesAndNorm cn = mortonCodes(local_pos, global_bb);
+        sort_local_data(cn, local_pos, local_mass, local_vel, local_ids);
+        auto t4_end = std::chrono::high_resolution_clock::now();
+        agg_pretree += std::chrono::duration_cast<std::chrono::microseconds>(t4_end - t4_start).count();
+
+        // 5. BUILD LOCAL TREE
+        auto t5_start = std::chrono::high_resolution_clock::now();
+        OctreeMap my_tree = buildOctree1(cn.code, local_pos, local_mass);
+        // OctreeMap my_tree2 =  buildOctree2(cn.code, local_pos, local_mass);
+        // compareFlattened(flattenTree(my_tree) ,flattenTree(my_tree2));
+        auto t5_end = std::chrono::high_resolution_clock::now();
+        agg_build += std::chrono::duration_cast<std::chrono::microseconds>(t5_end - t5_start).count();
+
+        // 6. Exchange trees
+        auto t6_start = std::chrono::high_resolution_clock::now();
         OctreeMap full_tree;
         switch (fcPol) {
             case FCPolicy::Tree:
@@ -156,40 +199,80 @@ int main(int argc, char **argv) {
             case FCPolicy::LET:
                 if (rank == 0)
                     std::cout << "LET exchange not yet implemented – falling back" << std::endl;
-                exchange_whole_trees(my_tree, full_tree, MPI_NODE, rank, size);
+                // exchange_whole_trees(my_tree, full_tree, MPI_NODE, rank, size);
                 break;
             default:
                 MPI_Abort(MPI_COMM_WORLD, 999);
         }
+        auto t6_end = std::chrono::high_resolution_clock::now();
+        agg_exchange += std::chrono::duration_cast<std::chrono::microseconds>(t6_end - t6_start).count();
 
-        // 6. Compute new accelerations
+        // 7. Compute new accelerations
+        auto t7_start = std::chrono::high_resolution_clock::now();
         local_acc.resize(local_pos.size());
-        bhAccelerations(full_tree, cn.code,  local_pos, theta, G, 0.0, global_bb, local_acc);
+        bhAccelerations(full_tree, cn.code, local_pos, theta, G, 0.0, global_bb, local_acc);
+        auto t7_end = std::chrono::high_resolution_clock::now();
+        agg_accel += std::chrono::duration_cast<std::chrono::microseconds>(t7_end - t7_start).count();
 
-        // 7. Second half‑kick
+        // 8. Second half-kick
+        auto t8_start = std::chrono::high_resolution_clock::now();
+        #pragma omp parallel for
         for (size_t i = 0; i < local_pos.size(); ++i) {
             local_vel[i].x += 0.5 * dt * local_acc[i].x;
             local_vel[i].y += 0.5 * dt * local_acc[i].y;
             local_vel[i].z += 0.5 * dt * local_acc[i].z;
         }
-        // 8. Visualization
+        auto t8_end = std::chrono::high_resolution_clock::now();
+        agg_kick2 += std::chrono::duration_cast<std::chrono::microseconds>(t8_end - t8_start).count();
+
+        // 9. Visualization (and report)
+        auto t9_start = std::chrono::high_resolution_clock::now();
         if (t >= next_vis_time || step == 0) {
             writeSnapshot(rank, vis_step, local_ids, local_mass,
-                        local_pos, local_vel, local_acc, out_dir);
+                          local_pos, local_vel, local_acc, out_dir);
 
             MPI_Barrier(MPI_COMM_WORLD);
 
             if (rank == 0) {
                 updatePVDFile(args, size, vis_step, t, out_dir);
                 std::cout << "Saved frame " << vis_step << " at t=" << t << std::endl;
+
+                // compute totals
+                long long total_us = agg_halfkick + agg_drift + agg_rebalance +
+                                     agg_pretree + agg_build + agg_exchange +
+                                     agg_accel + agg_kick2;
+                double total_s = total_us / 1e6;
+
+                // report total
+                std::cout << std::fixed << std::setprecision(3)
+                          << "  Total time since last frame: "
+                          << total_us << " µs (" << total_s << " s)\n";
+
+                // report percentages
+                std::cout << std::fixed << std::setprecision(1)
+                          << "  half-kick:   " << (100.0 * agg_halfkick  / total_us) << "%\n"
+                          << "  drift:       " << (100.0 * agg_drift     / total_us) << "%\n"
+                          << "  rebalance:   " << (100.0 * agg_rebalance / total_us) << "%\n"
+                          << "  prep-tree:   " << (100.0 * agg_pretree   / total_us) << "%\n"
+                          << "  build-tree:  " << (100.0 * agg_build     / total_us) << "%\n"
+                          << "  exchange:    " << (100.0 * agg_exchange  / total_us) << "%\n"
+                          << "  accel:       " << (100.0 * agg_accel     / total_us) << "%\n"
+                          << "  second-kick: " << (100.0 * agg_kick2     / total_us) << "%\n";
+
+                // reset accumulators
+                agg_halfkick  = agg_drift  = agg_rebalance = 0;
+                agg_pretree   = agg_build  = agg_exchange  = 0;
+                agg_accel     = agg_kick2 = 0;
             }
+
             next_vis_time += vs_interval;
             vis_step++;
         }
+        auto t9_end = std::chrono::high_resolution_clock::now();
+        agg_viz += std::chrono::duration_cast<std::chrono::microseconds>(t9_end - t9_start).count();
     }
 
     if (rank == 0) std::cout << "Simulation finished.\n";
-
 
     // Cleanup
     MPI_Type_free(&MPI_ID);
@@ -200,4 +283,3 @@ int main(int argc, char **argv) {
     MPI_Finalize();
     return 0;
 }
-

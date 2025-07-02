@@ -1,12 +1,28 @@
 cmake_minimum_required(VERSION 3.16.3)
 project(ParallelNBodySimulation VERSION 1.0 LANGUAGES CXX)
 
-
 # Default to a Release build for performance if not specified.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build" FORCE)
 endif()
 
+# ------------------------------------------------------------------
+# Fetch oneTBB via CMake’s FetchContent
+# ------------------------------------------------------------------
+set(TBB_TEST        OFF CACHE BOOL "" FORCE)
+set(TBBMALLOC_BUILD OFF CACHE BOOL "" FORCE)
+set(TBB_BIND_BUILD  OFF CACHE BOOL "" FORCE)
+
+include(FetchContent)
+
+FetchContent_Declare(
+  oneTBB
+  GIT_REPOSITORY https://github.com/oneapi-src/oneTBB.git
+  GIT_TAG        v2022.2.0
+  GIT_SHALLOW    TRUE
+)
+set(FETCHCONTENT_QUIET OFF)
+FetchContent_MakeAvailable(oneTBB)
 
 # macOS OpenMP flags
 if(APPLE)
@@ -44,13 +60,14 @@ target_link_libraries(solar_system_lib PUBLIC OpenMP::OpenMP_CXX)
 find_package(MPI REQUIRED)
 target_link_libraries(solar_system_lib PUBLIC MPI::MPI_CXX)
 
+# oneTBB
+# (fetched above via FetchContent, provides the TBB::tbb target)
+target_link_libraries(solar_system_lib PUBLIC TBB::tbb)
+
 # main executable
 add_executable(simulate src/main.cpp)
 target_link_libraries(simulate PRIVATE solar_system_lib)
 
-
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER_ID}")
 message(STATUS "Configured")
-
-

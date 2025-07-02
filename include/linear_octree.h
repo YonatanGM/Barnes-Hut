@@ -3,6 +3,7 @@
 #include <vector>
 #include <cstdint>
 #include <unordered_map>
+#include "robin_hood.h"
 #include "body.h"
 
 // Defines a unique key for a node in the octree using its Morton prefix and depth.
@@ -32,7 +33,10 @@ struct OctreeNode {
 };
 
 // The linear octree is represented as a hash map from a key to a node.
-using OctreeMap = std::unordered_map<OctreeKey, OctreeNode, OctreeKeyHash>;
+// using OctreeMap = std::unordered_map<OctreeKey, OctreeNode, OctreeKeyHash>;
+
+using OctreeMap = robin_hood::unordered_flat_map<
+        OctreeKey, OctreeNode, OctreeKeyHash>;
 
 // A plain data structure for sending/receiving tree nodes over MPI.
 struct NodeRecord {
@@ -62,3 +66,7 @@ std::vector<NodeRecord> flattenTree(const OctreeMap& tree);
 void mergeIntoTree(OctreeMap& tree, const std::vector<NodeRecord>& records);
 
 void printTree(const char* title, const OctreeMap& tree);
+
+void compareFlattened(const std::vector<NodeRecord> A,
+                      const std::vector<NodeRecord> B,
+                      double tol = 1e-9);

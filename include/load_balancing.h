@@ -5,17 +5,18 @@
 
 #include "body.h"
 #include "policy.h"
-#include "morton_keys.h"         
-#include "linear_octree.h"      
+#include "utility.h"
+#include "morton_keys.h"
+#include "linear_octree.h"
 
 
-CodesAndNorm rebalance_bodies(
+void rebalance_bodies(
     int rank, int size,
+    const CodesAndNorm &cn,
     std::vector<Position> &local_pos,
     std::vector<double> &local_mass,
     std::vector<Velocity> &local_vel,
-    std::vector<uint64_t>  local_ids,
-    BoundingBox& out_global_bb);
+    std::vector<uint64_t> &local_ids);
 
 
 /* Packs & scatters the bodies according to the chosen policy.
