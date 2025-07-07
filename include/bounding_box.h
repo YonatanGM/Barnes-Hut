@@ -73,21 +73,49 @@ inline BoundingBox compute_global_bbox(const BoundingBox& local_bb) {
     return global_bb;
 }
 
-inline BoundingBox key_to_bounding_box(const OctreeKey& key, const BoundingBox& global_bb) {
-    const double size = (global_bb.max.x - global_bb.min.x) / (1 << key.depth);
+// solar-sim/include/bounding_box.h
+
+inline BoundingBox key_to_bounding_box(const OctreeKey& k,
+                                       const BoundingBox& global_bb)
+{
+    // FIX: Use anisotropic dimensions, not a single cubic 'L'.
+    double dx = global_bb.max.x - global_bb.min.x;
+    double dy = global_bb.max.y - global_bb.min.y;
+    double dz = global_bb.max.z - global_bb.min.z;
+
+    // The size of a cell at depth 'd' is the parent size / 2.
+    double sizeX = dx / (1 << k.depth);
+    double sizeY = dy / (1 << k.depth);
+    double sizeZ = dz / (1 << k.depth);
+
+    // Calculate the minimum corner of the box from the Morton prefix.
     double x = global_bb.min.x;
     double y = global_bb.min.y;
     double z = global_bb.min.z;
 
-    uint64_t prefix = key.prefix;
-    for (int d = 0; d < key.depth; ++d) {
-        // Extract the 3 bits for this level from the Morton code
-        int octant = (prefix >> (63 - 3 * (d + 1))) & 0x7;
-        double step = (global_bb.max.x - global_bb.min.x) / (2 << d);
-        if (octant & 1) x += step; // Check x-bit
-        if (octant & 2) y += step; // Check y-bit
-        if (octant & 4) z += step; // Check z-bit
+    double stepX = dx;
+    double stepY = dy;
+    double stepZ = dz;
+
+    for (int d = 0; d < k.depth; ++d) {
+        stepX /= 2.0;
+        stepY /= 2.0;
+        stepZ /= 2.0;
+        int oct = (k.prefix >> (63 - 3*(d+1))) & 7;
+        if (oct & 1) x += stepX;
+        if (oct & 2) y += stepY;
+        if (oct & 4) z += stepZ;
     }
 
-    return {{x, y, z}, {x + size, y + size, z + size}};
+    return {{x, y, z}, {x + sizeX, y + sizeY, z + sizeZ}};
 }
+
+inline double point_box_sq(double x,double y,double z, const BoundingBox& b)
+{
+    /* distance along each axis (0 if inside) */
+    double dx = std::max(0.0, std::max(b.min.x - x, x - b.max.x));
+    double dy = std::max(0.0, std::max(b.min.y - y, y - b.max.y));
+    double dz = std::max(0.0, std::max(b.min.z - z, z - b.max.z));
+    return dx*dx + dy*dy + dz*dz;
+}
+

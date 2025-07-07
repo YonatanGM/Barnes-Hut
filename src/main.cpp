@@ -126,7 +126,7 @@ int main(int argc, char **argv) {
     double next_vis_time = 0.0;
     int vis_step = 0;
     double t = 0.0;
-    constexpr int REBALANCE_INTERVAL = 32;
+    constexpr int REBALANCE_INTERVAL = 20;
 
     // accumulators (in microseconds)
     long long agg_halfkick   = 0;
@@ -142,6 +142,7 @@ int main(int argc, char **argv) {
     if (rank == 0)
         std::cout << "Starting simulation (dt=" << dt << ", tend=" << t_end << ")\n";
 
+    std::vector<std::vector<uint64_t>> rank_domain_keys;
     for (int step = 0; t < t_end; ++step, t += dt) {
         // 1. Half-kick
         auto t1_start = std::chrono::high_resolution_clock::now();
@@ -175,7 +176,7 @@ int main(int argc, char **argv) {
             BoundingBox current_local_bb = compute_local_bbox(local_pos);
             BoundingBox current_global_bb = compute_global_bbox(current_local_bb);
             CodesAndNorm current_cn = mortonCodes(local_pos, current_global_bb);
-            rebalance_bodies(rank, size, current_cn, local_pos, local_mass, local_vel, local_ids);
+            rebalance_bodies(rank, size, current_cn, local_pos, local_mass, local_vel, local_ids, rank_domain_keys);
         }
         auto t3_end = std::chrono::high_resolution_clock::now();
         agg_rebalance += std::chrono::duration_cast<std::chrono::microseconds>(t3_end - t3_start).count();
@@ -208,14 +209,24 @@ int main(int argc, char **argv) {
                 break;
             case FCPolicy::LET:
                 // exchange_LET(my_tree, remote_nodes, local_bb, global_bb, theta, MPI_NODE, MPI_BoundingBox, rank, size);
-                exchange_LET(my_tree, remote_nodes, local_bb, global_bb, theta, MPI_NODE, MPI_BoundingBox, rank, size);
+                // exchange_LET(my_tree, remote_nodes, local_bb, global_bb, theta, MPI_NODE, MPI_BoundingBox, rank, size);
 
                 // Merge the remote nodes into the tree.
-                mergeIntoTree(full_tree, remote_nodes);
+                // mergeIntoTree(full_tree, remote_nodes);
 
                 // Perform the upward pass to fix the moments of all ancestors.
-                recompute_ancestor_moments(full_tree, remote_nodes);
+                // recompute_ancestor_moments(full_tree, remote_nodes);
                 // exchange_LET(my_tree, full_tree, local_bb, global_bb, theta, MPI_NODE, MPI_BoundingBox, rank, size);
+
+                // if (rank_domain_keys.empty() && rank == 0) {
+                //          std::cout << "Warning: rank_domain_keys is empty because rebalancing was skipped."
+                //                    << " LET exchange may be incorrect." << std::endl;
+                //     }
+
+                // Call the new LET function with the digital domain keys.
+                exchange_LET_gather_remotes(my_tree, remote_nodes, global_bb, theta, MPI_NODE, rank, size, rank_domain_keys);
+                // exchange_LET(my_tree, full_tree, global_bb, theta, MPI_NODE, rank, size, rank_domain_keys);
+
                 break;
             default:
                 MPI_Abort(MPI_COMM_WORLD, 999);
@@ -226,7 +237,13 @@ int main(int argc, char **argv) {
         // 7. Compute new accelerations
         auto t7_start = std::chrono::high_resolution_clock::now();
         local_acc.resize(local_pos.size());
-        bhAccelerations(full_tree, cn.code, local_pos, theta, G, 0.0, global_bb, local_acc);
+
+        if (fcPol == FCPolicy::Tree) {
+            bhAccelerations(full_tree, cn.code, local_pos, theta, G, 0.0, global_bb, local_acc);
+        } else { // FCPolicy::LET
+            bhAccelerations_dual_walk(my_tree, remote_nodes, cn.code, local_pos, theta, G, 0.0, global_bb, local_acc);
+        }
+        // bhAccelerations(full_tree, cn.code, local_pos, theta, G, 0.0, global_bb, local_acc);
         // bhAccelerations(my_tree, remote_nodes, cn.code, local_pos, theta, G, 0.0, global_bb, local_acc);
         auto t7_end = std::chrono::high_resolution_clock::now();
         agg_accel += std::chrono::duration_cast<std::chrono::microseconds>(t7_end - t7_start).count();

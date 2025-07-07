@@ -17,6 +17,7 @@ static inline uint64_t spread21(uint32_t v) {
     return x;
 }
 
+
 uint64_t morton63(uint32_t xi, uint32_t yi, uint32_t zi) {
     // Interleave the spread bits of x, y, and z coordinates
     return spread21(xi) | (spread21(yi) << 1) | (spread21(zi) << 2);

@@ -15,8 +15,7 @@ static inline uint64_t mortonPrefix(uint64_t code, int depth) {
     return code & (~0ULL << shift);
 }
 
-#include <algorithm>
-#include <vector>
+
 
 // ── Optimised, serial aggregation ───────────────────────────────────
 OctreeMap buildOctree1(const std::vector<uint64_t>& mortonCodes,

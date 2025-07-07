@@ -10,7 +10,8 @@ void rebalance_bodies(
     std::vector<Position> &local_pos,
     std::vector<double> &local_mass,
     std::vector<Velocity> &local_vel,
-    std::vector<uint64_t> &local_ids) {
+    std::vector<uint64_t> &local_ids,
+    std::vector<std::vector<uint64_t>>& rank_domain_keys) {
 
     (void)rank;
 
@@ -34,13 +35,30 @@ void rebalance_bodies(
                                                 global_hist.end(), 0LL);
     const long long ideal = (total_particles + size - 1) / size; // ceil
 
+    rank_domain_keys.assign(size, std::vector<uint64_t>());
     std::vector<int> splitters; // length P‑1
     splitters.reserve(size - 1);
+
     long long run_sum = 0;
     for (int i = 0; i < NUM_BUCKETS && splitters.size() < static_cast<size_t>(size - 1); ++i) {
         run_sum += global_hist[i];
-        if (run_sum >= static_cast<long long>(splitters.size() + 1) * ideal)
+
+        if (run_sum >= static_cast<long long>(splitters.size() + 1) * ideal) {
             splitters.push_back(i);
+        }
+    }
+
+    rank_domain_keys.assign(size, std::vector<uint64_t>());
+    for (int i = 0; i < NUM_BUCKETS; ++i) {
+        // Only consider buckets that actually contain particles.
+        if (global_hist[i] > 0) {
+            // Use upper_bound to find which rank this bucket index 'i' belongs to.
+            // This is the same logic used later to migrate particles.
+            int dest_rank = std::upper_bound(splitters.begin(), splitters.end(), i) - splitters.begin();
+
+            uint64_t bucket_prefix = static_cast<uint64_t>(i) << (64 - BUCKET_BITS);
+            rank_domain_keys[dest_rank].push_back(bucket_prefix);
+        }
     }
 
     // Step 4: build send buffers + Alltoallv migration
@@ -106,28 +124,4 @@ void rebalance_bodies(
     MPI_Alltoallv(ids_send.data(),  send_counts.data(), sdispls.data(), MPI_ID,
                 local_ids.data(), recv_counts.data(), rdispls.data(), MPI_ID, MPI_COMM_WORLD);
 
-    // Recompute codes for the new local particles, then sort everything
-    // tree building stage needs the data in sorted order
-    // CodesAndNorm final_cn = mortonCodes(local_pos, global_bb);
-
-    // std::vector<size_t> sort_idx(total_recv);
-    // std::iota(sort_idx.begin(), sort_idx.end(), 0);
-    // std::sort(sort_idx.begin(), sort_idx.end(), [&](size_t a, size_t b) {
-    //     return final_cn.code[a] < final_cn.code[b];
-    // });
-
-    // auto permute = [&](auto &vec) {
-    //     std::vector<std::decay_t<decltype(vec[0])>> tmp(vec.size());
-    //     for (size_t i = 0; i < vec.size(); ++i) tmp[i] = vec[sort_idx[i]];
-    //     vec.swap(tmp);
-    // };
-
-    // permute(local_pos);
-    // permute(local_mass);
-    // permute(local_vel);
-    // permute(local_ids);
-    // permute(final_cn.code);
-    // permute(final_cn.norm);
-
-    // return final_cn;
 }
