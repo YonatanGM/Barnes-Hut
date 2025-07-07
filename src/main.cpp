@@ -208,25 +208,7 @@ int main(int argc, char **argv) {
                 exchange_whole_trees(my_tree, full_tree, MPI_NODE, rank, size);
                 break;
             case FCPolicy::LET:
-                // exchange_LET(my_tree, remote_nodes, local_bb, global_bb, theta, MPI_NODE, MPI_BoundingBox, rank, size);
-                // exchange_LET(my_tree, remote_nodes, local_bb, global_bb, theta, MPI_NODE, MPI_BoundingBox, rank, size);
-
-                // Merge the remote nodes into the tree.
-                // mergeIntoTree(full_tree, remote_nodes);
-
-                // Perform the upward pass to fix the moments of all ancestors.
-                // recompute_ancestor_moments(full_tree, remote_nodes);
-                // exchange_LET(my_tree, full_tree, local_bb, global_bb, theta, MPI_NODE, MPI_BoundingBox, rank, size);
-
-                // if (rank_domain_keys.empty() && rank == 0) {
-                //          std::cout << "Warning: rank_domain_keys is empty because rebalancing was skipped."
-                //                    << " LET exchange may be incorrect." << std::endl;
-                //     }
-
-                // Call the new LET function with the digital domain keys.
                 exchange_LET_gather_remotes(my_tree, remote_nodes, global_bb, theta, MPI_NODE, rank, size, rank_domain_keys);
-                // exchange_LET(my_tree, full_tree, global_bb, theta, MPI_NODE, rank, size, rank_domain_keys);
-
                 break;
             default:
                 MPI_Abort(MPI_COMM_WORLD, 999);
@@ -243,8 +225,6 @@ int main(int argc, char **argv) {
         } else { // FCPolicy::LET
             bhAccelerations_dual_walk(my_tree, remote_nodes, cn.code, local_pos, theta, G, 0.0, global_bb, local_acc);
         }
-        // bhAccelerations(full_tree, cn.code, local_pos, theta, G, 0.0, global_bb, local_acc);
-        // bhAccelerations(my_tree, remote_nodes, cn.code, local_pos, theta, G, 0.0, global_bb, local_acc);
         auto t7_end = std::chrono::high_resolution_clock::now();
         agg_accel += std::chrono::duration_cast<std::chrono::microseconds>(t7_end - t7_start).count();
 
