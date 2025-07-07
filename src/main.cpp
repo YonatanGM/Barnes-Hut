@@ -29,7 +29,7 @@
 
 
 // Forward declarations of MPI datatypes
-MPI_Datatype MPI_POSITION, MPI_VELOCITY, MPI_ACCELERATION, MPI_NODE, MPI_ID;
+MPI_Datatype MPI_POSITION, MPI_VELOCITY, MPI_ACCELERATION, MPI_NODE, MPI_ID, MPI_BoundingBox;
 
 int main(int argc, char **argv) {
     int provided;
@@ -108,6 +108,12 @@ int main(int argc, char **argv) {
                            MPI_DOUBLE};
     MPI_Type_create_struct(3, blk, dsp, typ, &MPI_NODE); MPI_Type_commit(&MPI_NODE);
 
+    int blk_lengths[2] = {1, 1};
+    MPI_Aint displacements[2] = {offsetof(BoundingBox, min), offsetof(BoundingBox, max)};
+    MPI_Datatype types[2] = {MPI_POSITION, MPI_POSITION};
+    MPI_Type_create_struct(2, blk_lengths, displacements, types, &MPI_BoundingBox);
+    MPI_Type_commit(&MPI_BoundingBox);
+
     // Scatter initial data
     MPI_Scatterv(init_pos.data(), counts.data(), displs.data(), MPI_POSITION, local_pos.data(), counts[rank], MPI_POSITION, 0, MPI_COMM_WORLD);
     MPI_Scatterv(init_vel.data(), counts.data(), displs.data(), MPI_VELOCITY, local_vel.data(), counts[rank], MPI_VELOCITY, 0, MPI_COMM_WORLD);
@@ -166,7 +172,8 @@ int main(int argc, char **argv) {
         if (step % REBALANCE_INTERVAL == 0) {
             if (rank == 0) std::cout << "Step " << step << ": Rebalancing particles...\n";
 
-            BoundingBox current_global_bb = compute_global_bbox(local_pos);
+            BoundingBox current_local_bb = compute_local_bbox(local_pos);
+            BoundingBox current_global_bb = compute_global_bbox(current_local_bb);
             CodesAndNorm current_cn = mortonCodes(local_pos, current_global_bb);
             rebalance_bodies(rank, size, current_cn, local_pos, local_mass, local_vel, local_ids);
         }
@@ -175,7 +182,9 @@ int main(int argc, char **argv) {
 
         // 4. PREPARE FOR TREE BUILD
         auto t4_start = std::chrono::high_resolution_clock::now();
-        BoundingBox global_bb = compute_global_bbox(local_pos);
+        BoundingBox local_bb = compute_local_bbox(local_pos);
+        BoundingBox global_bb = compute_global_bbox(local_bb);
+
         CodesAndNorm cn = mortonCodes(local_pos, global_bb);
         sort_local_data(cn, local_pos, local_mass, local_vel, local_ids);
         auto t4_end = std::chrono::high_resolution_clock::now();
@@ -192,14 +201,21 @@ int main(int argc, char **argv) {
         // 6. Exchange trees
         auto t6_start = std::chrono::high_resolution_clock::now();
         OctreeMap full_tree;
+        std::vector<NodeRecord> remote_nodes;
         switch (fcPol) {
             case FCPolicy::Tree:
                 exchange_whole_trees(my_tree, full_tree, MPI_NODE, rank, size);
                 break;
             case FCPolicy::LET:
-                if (rank == 0)
-                    std::cout << "LET exchange not yet implemented – falling back" << std::endl;
-                // exchange_whole_trees(my_tree, full_tree, MPI_NODE, rank, size);
+                // exchange_LET(my_tree, remote_nodes, local_bb, global_bb, theta, MPI_NODE, MPI_BoundingBox, rank, size);
+                exchange_LET(my_tree, remote_nodes, local_bb, global_bb, theta, MPI_NODE, MPI_BoundingBox, rank, size);
+
+                // Merge the remote nodes into the tree.
+                mergeIntoTree(full_tree, remote_nodes);
+
+                // Perform the upward pass to fix the moments of all ancestors.
+                recompute_ancestor_moments(full_tree, remote_nodes);
+                // exchange_LET(my_tree, full_tree, local_bb, global_bb, theta, MPI_NODE, MPI_BoundingBox, rank, size);
                 break;
             default:
                 MPI_Abort(MPI_COMM_WORLD, 999);
@@ -211,6 +227,7 @@ int main(int argc, char **argv) {
         auto t7_start = std::chrono::high_resolution_clock::now();
         local_acc.resize(local_pos.size());
         bhAccelerations(full_tree, cn.code, local_pos, theta, G, 0.0, global_bb, local_acc);
+        // bhAccelerations(my_tree, remote_nodes, cn.code, local_pos, theta, G, 0.0, global_bb, local_acc);
         auto t7_end = std::chrono::high_resolution_clock::now();
         agg_accel += std::chrono::duration_cast<std::chrono::microseconds>(t7_end - t7_start).count();
 

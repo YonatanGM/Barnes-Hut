@@ -4,11 +4,10 @@
 #include <string>
 #include "body.h"
 #include "tinyxml2.h"
-#include "cxxopts.hpp" 
+#include "cxxopts.hpp"
 
-
-// Reads body data (mass, position, velocity) from a specified CSV file.
-// Returns true on success, false on failure.
+// Reads body data (mass, position, velocity) from a specified CSV file
+// Returns true on success, false on failure
 bool readCSV(
     const std::string& filename,
     std::vector<uint64_t>& ids,

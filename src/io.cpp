@@ -231,13 +231,14 @@ void updatePVDFile(const cxxopts::ParseResult& args,
     std::string tend_str = args["tend"].as<std::string>();
     double theta = args["theta"].as<double>();
     int nbodies = args["bodies"].as<int>();
-
+    std::string fc = args["fc"].as<std::string>();
     std::ostringstream oss_fname;
     oss_fname << input_stem
             << "_dt" << dt_str
             << "_tend" << tend_str
             << "_theta" << theta
             << "_bodies" << nbodies
+            << "_fc" << fc
             << ".pvd";
     std::string pvdFilename = oss_fname.str();
     std::string pvdPath = (std::filesystem::path(vs_dir) / pvdFilename).string();

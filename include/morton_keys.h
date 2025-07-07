@@ -1,8 +1,10 @@
 #pragma once
 
+#include "body.h"
+#include "bounding_box.h"
 #include <vector>
 #include <cstdint>
-#include "body.h"
+
 
 // Computes a 63-bit Morton code from 21-bit integer coordinates for each axis.
 uint64_t morton63(uint32_t xi, uint32_t yi, uint32_t zi);

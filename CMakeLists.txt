@@ -42,6 +42,7 @@ add_library(solar_system_lib STATIC
   src/load_balancing.cpp
   src/exchange.cpp
   src/io.cpp
+  src/traversal.cpp
   src/tinyxml2.cpp
 )
 

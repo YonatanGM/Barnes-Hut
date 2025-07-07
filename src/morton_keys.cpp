@@ -3,7 +3,6 @@
 #include <cmath>
 #include <limits>
 
-// --- Helper functions (kept local to this file) ---
 
 // Spreads the lower 21 bits of an integer to a 63-bit value,
 // inserting two zero bits between each original bit.
@@ -17,8 +16,6 @@ static inline uint64_t spread21(uint32_t v) {
     x = (x | (x <<  2)) & 0x1249249249249249ULL;
     return x;
 }
-
-// --- Public function implementations ---
 
 uint64_t morton63(uint32_t xi, uint32_t yi, uint32_t zi) {
     // Interleave the spread bits of x, y, and z coordinates
