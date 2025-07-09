@@ -1,84 +1,125 @@
-#include <array>
-#include <cmath>
+#include "body.h"
+#include "linear_octree.h"
+#include "morton_keys.h"
 #include <vector>
-#include <stdexcept>
-#include <omp.h>
+#include <mpi.h>
+#include <limits>
+#include <algorithm>
 
-void bhAccelerations(
-    const OctreeMap&                tree,
-    const std::vector<uint64_t>&    key,       // one Morton key per body
-    const std::vector<Position>&    pos,       // physical coords (e.g. AU)
-    double                          theta,
-    double                          G,
-    double                          soft2,     // ε²
-    const BoundingBox&              global_bb, // from rebalance_bodies
-    std::vector<Acceleration>&      out)
-{
-    const size_t N = pos.size();
-    out.resize(N);
-    const double theta2 = theta * theta;
 
-    // --- Compute physical cell side² for depths 0…MAX_L ---
-    constexpr int MAX_L = 21;
-    // find the largest dimension of the global box
+double min_distance_sq(const BoundingBox& b1, const BoundingBox& b2) {
+    // For each axis, find the separation distance. If the boxes overlap on an
+    // axis, the distance is 0.
+    double dx = std::max(0.0, std::max(b1.min.x - b2.max.x, b2.min.x - b1.max.x));
+    double dy = std::max(0.0, std::max(b1.min.y - b2.max.y, b2.min.y - b1.max.y));
+    double dz = std::max(0.0, std::max(b1.min.z - b2.max.z, b2.min.z - b1.max.z));
+
+    return dx * dx + dy * dy + dz * dz;
+}
+
+/**
+ * @brief Computes the tight bounding box for a vector of local positions.
+ */
+BoundingBox compute_local_bbox(const std::vector<Position>& local_pos) {
+    BoundingBox local_bb;
+    if (local_pos.empty()) {
+        // Return a default-constructed "invalid" box if there are no points.
+        // The MPI_Allreduce will correctly handle this.
+        return local_bb;
+    }
+
+    // Initialize with the first point
+    local_bb.min = local_pos[0];
+    local_bb.max = local_pos[0];
+
+    // Expand the box to include all other points
+    for (size_t i = 1; i < local_pos.size(); ++i) {
+        const auto& p = local_pos[i];
+        local_bb.min.x = std::min(local_bb.min.x, p.x);
+        local_bb.min.y = std::min(local_bb.min.y, p.y);
+        local_bb.min.z = std::min(local_bb.min.z, p.z);
+        local_bb.max.x = std::max(local_bb.max.x, p.x);
+        local_bb.max.y = std::max(local_bb.max.y, p.y);
+        local_bb.max.z = std::max(local_bb.max.z, p.z);
+    }
+    return local_bb;
+}
+
+BoundingBox compute_global_bbox(const BoundingBox& local_bb) {
+    BoundingBox global_bb;
+    // Use MPI_Allreduce to find the global min and max corners
+    MPI_Allreduce(&local_bb.min, &global_bb.min, 3, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+    MPI_Allreduce(&local_bb.max, &global_bb.max, 3, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+
+    return global_bb;
+}
+
+
+BoundingBox key_to_bounding_box(const OctreeKey& k,
+                                const BoundingBox& global_bb) {
+    // 1. Get the real-world dimensions of the global box
     double dx = global_bb.max.x - global_bb.min.x;
     double dy = global_bb.max.y - global_bb.min.y;
     double dz = global_bb.max.z - global_bb.min.z;
-    double L  = std::max({dx, dy, dz});       // physical side-length of root cell
 
-    std::array<double, MAX_L+1> side2;
-    for (int d = 0; d <= MAX_L; ++d) {
-        double side = L / double(1ULL << d);
-        side2[d] = side * side;
-    }
+    // 2. Calculate the real-world size of a cell at this depth
+    double sizeX = dx / (1 << k.depth);
+    double sizeY = dy / (1 << k.depth);
+    double sizeZ = dz / (1 << k.depth);
 
-    constexpr int STACK_MAX = 256; // safe for depth ≤21
+    // 3. REUSE YOUR EXISTING FUNCTION to get the normalized [0,1) position
+    //    of the cell's minimum corner.
+    Position norm_min = key_to_normalized_position(k.prefix, k.depth);
 
-    #pragma omp parallel for schedule(dynamic,256)
-    for (size_t i = 0; i < N; ++i) {
-        double ax = 0.0, ay = 0.0, az = 0.0;
+    // 4. Scale the normalized coordinates to the real-world minimum corner position
+    double min_x = global_bb.min.x + norm_min.x * dx;
+    double min_y = global_bb.min.y + norm_min.y * dy;
+    double min_z = global_bb.min.z + norm_min.z * dz;
 
-        std::array<std::pair<uint64_t,uint8_t>, STACK_MAX> stack;
-        int top = 0;
-        stack[top++] = {0ULL, 0};  // push root (prefix=0,depth=0)
-
-        while (top) {
-            auto [pref, dep] = stack[--top];
-            auto it = tree.find(OctreeKey{pref, dep});
-            if (it == tree.end() || it->second.mass == 0.0) continue;
-            const OctreeNode& node = it->second;
-
-            // skip self‐interaction at leaf
-            if (dep == MAX_L && pref == key[i]) continue;
-
-            double dx = node.comX - pos[i].x;
-            double dy = node.comY - pos[i].y;
-            double dz = node.comZ - pos[i].z;
-            double r2 = dx*dx + dy*dy + dz*dz + soft2;
-
-            // Barnes–Hut acceptance: cell is “small” relative to distance
-            if (dep == MAX_L || side2[dep] < theta2 * r2) {
-                double invR  = 1.0 / std::sqrt(r2);
-                double invR3 = invR * invR * invR;
-                double s     = G * node.mass * invR3;
-                ax += s * dx;  ay += s * dy;  az += s * dz;
-            } else {
-                // open cell: push its children
-                uint8_t cdep = dep + 1;
-                uint64_t stride = 1ULL << (63 - 3*cdep);
-                for (uint8_t oc = 0; oc < 8; ++oc) {
-                    uint64_t child = pref + stride*oc;
-                    if (tree.count(OctreeKey{child, cdep})) {
-                        if (top < STACK_MAX) {
-                            stack[top++] = {child, cdep};
-                        } else {
-                            throw std::runtime_error("BH stack overflow");
-                        }
-                    }
-                }
-            }
-        }
-
-        out[i] = {ax, ay, az};
-    }
+    // 5. Return the final bounding box
+    return {{min_x, min_y, min_z}, {min_x + sizeX, min_y + sizeY, min_z + sizeZ}};
 }
+
+double point_box_sq(double x,double y,double z, const BoundingBox& b) {
+    /* distance along each axis (0 if inside) */
+    double dx = std::max(0.0, std::max(b.min.x - x, x - b.max.x));
+    double dy = std::max(0.0, std::max(b.min.y - y, y - b.max.y));
+    double dz = std::max(0.0, std::max(b.min.z - z, z - b.max.z));
+    return dx*dx + dy*dy + dz*dz;
+}
+
+
+// BoundingBox key_to_bounding_box(const OctreeKey& k,
+//                                        const BoundingBox& global_bb)
+// {
+//     // FIX: Use anisotropic dimensions, not a single cubic 'L'.
+//     double dx = global_bb.max.x - global_bb.min.x;
+//     double dy = global_bb.max.y - global_bb.min.y;
+//     double dz = global_bb.max.z - global_bb.min.z;
+
+//     // The size of a cell at depth 'd' is the parent size / 2.
+//     double sizeX = dx / (1 << k.depth);
+//     double sizeY = dy / (1 << k.depth);
+//     double sizeZ = dz / (1 << k.depth);
+
+//     // Calculate the minimum corner of the box from the Morton prefix.
+//     double x = global_bb.min.x;
+//     double y = global_bb.min.y;
+//     double z = global_bb.min.z;
+
+//     double stepX = dx;
+//     double stepY = dy;
+//     double stepZ = dz;
+
+//     for (int d = 0; d < k.depth; ++d) {
+//         stepX /= 2.0;
+//         stepY /= 2.0;
+//         stepZ /= 2.0;
+//         int oct = (k.prefix >> (63 - 3*(d+1))) & 7;
+//         if (oct & 1) x += stepX;
+//         if (oct & 2) y += stepY;
+//         if (oct & 4) z += stepZ;
+//     }
+
+//     return {{x, y, z}, {x + sizeX, y + sizeY, z + sizeZ}};
+// }

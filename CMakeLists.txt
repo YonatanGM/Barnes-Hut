@@ -39,6 +39,7 @@ endif()
 add_library(solar_system_lib STATIC
   src/linear_octree.cpp
   src/morton_keys.cpp
+  src/bounding_box.cpp
   src/load_balancing.cpp
   src/exchange.cpp
   src/io.cpp

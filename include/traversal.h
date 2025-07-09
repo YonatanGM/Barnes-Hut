@@ -15,16 +15,16 @@ void bhAccelerations(
     const BoundingBox&              global_bb, // from rebalance_bodies
     std::vector<Acceleration>&      out);
 
-void bhAccelerations(
-    const OctreeMap&                local_tree,
-    const std::vector<NodeRecord>&  remote_nodes,
-    const std::vector<uint64_t>&    key,
-    const std::vector<Position>&    pos,
-    double                          theta,
-    double                          G,
-    double                          soft2,
-    const BoundingBox&              global_bb,
-    std::vector<Acceleration>&      out);
+// void bhAccelerations(
+//     const OctreeMap&                local_tree,
+//     const std::vector<NodeRecord>&  remote_nodes,
+//     const std::vector<uint64_t>&    key,
+//     const std::vector<Position>&    pos,
+//     double                          theta,
+//     double                          G,
+//     double                          soft2,
+//     const BoundingBox&              global_bb,
+//     std::vector<Acceleration>&      out);
 
 void bhAccelerations_dual_walk(
 const OctreeMap&                local_tree,

@@ -5,48 +5,6 @@
 #include <iostream>
 
 
-static inline uint64_t mortonPrefix(uint64_t code, int depth) {
-    if (depth == 0) return 0;
-    int shift = 63 - 3 * depth;
-    return code & (~0ULL << shift);
-}
-
-// Pulls the 21 x, y, or z bits back out of a 63-bit Morton word.
-static inline uint32_t compact21(uint64_t m) {
-    m &= 0x1249249249249249ULL;
-    m = (m ^ (m >>  2)) & 0x10c30c30c30c30c3ULL;
-    m = (m ^ (m >>  4)) & 0x100f00f00f00f00fULL;
-    m = (m ^ (m >>  8)) & 0x1f0000ff0000ffULL;
-    m = (m ^ (m >> 16)) & 0x1f00000000ffffULL;
-    m = (m ^ (m >> 32)) & 0x1fffff;
-    return static_cast<uint32_t>(m);
-}
-
-// De-interleaves the top 3*depth bits of the prefix into (ix,iy,iz) integer coordinates.
-static inline void decodePrefix(uint64_t prefix, int depth, uint32_t &ix, uint32_t &iy, uint32_t &iz) {
-    if (depth == 0) { ix = iy = iz = 0; return; }
-
-    // Move the relevant 3*d bits down to the LSBs and un-shuffle.
-    uint64_t bits = prefix >> (63 - 3 * depth);
-    ix = compact21(bits >> 0);
-    iy = compact21(bits >> 1);
-    iz = compact21(bits >> 2);
-}
-
-// Decodes a Morton key to the position of its minimum corner in normalized [0,1) space.
-static inline Position key_to_normalized_position(uint64_t prefix, int depth) {
-    uint32_t ix, iy, iz;
-    decodePrefix(prefix, depth, ix, iy, iz);
-
-    // Normalize the integer coordinates of the minimum corner.
-    constexpr double Q_INV = 1.0 / (1ULL << 21);
-    return {
-        static_cast<double>(ix) * Q_INV,
-        static_cast<double>(iy) * Q_INV,
-        static_cast<double>(iz) * Q_INV
-    };
-}
-
 
 void exchange_whole_trees(const OctreeMap &local_tree, OctreeMap &full_tree,
                           MPI_Datatype node_type, int /*rank*/, int size) {
@@ -73,6 +31,7 @@ void exchange_whole_trees(const OctreeMap &local_tree, OctreeMap &full_tree,
 void exchange_LET_gather_remotes(
     const OctreeMap&                        local_tree,
     std::vector<NodeRecord>&                remote_nodes, // Output
+    std::vector<int>&                       recv_counts, // Output
     const BoundingBox&                      global_bb,
     double                                  theta,
     MPI_Datatype                            node_type,
@@ -112,13 +71,14 @@ void exchange_LET_gather_remotes(
     std::vector<std::vector<NodeRecord>> send_lists(size);
     double theta2 = theta*theta;
     for(int dest=0; dest<size; ++dest){
-      if(dest==rank) continue;
-      send_lists[dest] = generate_interaction_list(
-        local_tree, bucket_boxes[dest], global_bb, theta2);
+        if(dest==rank) continue;
+        send_lists[dest] = generate_interaction_list(local_tree, bucket_boxes[dest], global_bb, theta2);
     }
 
     // 3) Perform MPI_Alltoallv to exchange LET data
-    std::vector<int> send_counts(size), recv_counts(size);
+    std::vector<int> send_counts(size);
+    recv_counts.resize(size);
+
     for(int r=0; r<size; ++r) send_counts[r] = int(send_lists[r].size());
     MPI_Alltoall(send_counts.data(), 1, MPI_INT,
                  recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);

@@ -5,15 +5,8 @@
 #include <iostream>
 #include <oneapi/tbb/parallel_sort.h>
 #include <omp.h>
+#include <morton_keys.h>
 #include <chrono>
-
-// Gets the Morton prefix of a code at a specific depth.
-static inline uint64_t mortonPrefix(uint64_t code, int depth) {
-    if (depth == 0) return 0;
-    // Creates a mask to keep the top 3*depth bits.
-    int shift = 63 - 3 * depth;
-    return code & (~0ULL << shift);
-}
 
 
 

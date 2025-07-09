@@ -143,6 +143,8 @@ int main(int argc, char **argv) {
         std::cout << "Starting simulation (dt=" << dt << ", tend=" << t_end << ")\n";
 
     std::vector<std::vector<uint64_t>> rank_domain_keys;
+    BoundingBox hist_global_bb;
+    std::vector<std::pair<long long, int>> last_global_hist;
     for (int step = 0; t < t_end; ++step, t += dt) {
         // 1. Half-kick
         auto t1_start = std::chrono::high_resolution_clock::now();
@@ -175,8 +177,9 @@ int main(int argc, char **argv) {
 
             BoundingBox current_local_bb = compute_local_bbox(local_pos);
             BoundingBox current_global_bb = compute_global_bbox(current_local_bb);
+            hist_global_bb = current_global_bb;
             CodesAndNorm current_cn = mortonCodes(local_pos, current_global_bb);
-            rebalance_bodies(rank, size, current_cn, local_pos, local_mass, local_vel, local_ids, rank_domain_keys);
+            rebalance_bodies(rank, size, current_cn, local_pos, local_mass, local_vel, local_ids, rank_domain_keys, last_global_hist);
         }
         auto t3_end = std::chrono::high_resolution_clock::now();
         agg_rebalance += std::chrono::duration_cast<std::chrono::microseconds>(t3_end - t3_start).count();
@@ -203,12 +206,13 @@ int main(int argc, char **argv) {
         auto t6_start = std::chrono::high_resolution_clock::now();
         OctreeMap full_tree;
         std::vector<NodeRecord> remote_nodes;
+        std::vector<int> remote_node_counts; // For visualization
         switch (fcPol) {
             case FCPolicy::Tree:
                 exchange_whole_trees(my_tree, full_tree, MPI_NODE, rank, size);
                 break;
             case FCPolicy::LET:
-                exchange_LET_gather_remotes(my_tree, remote_nodes, global_bb, theta, MPI_NODE, rank, size, rank_domain_keys);
+                exchange_LET_gather_remotes(my_tree, remote_nodes, remote_node_counts, global_bb, theta, MPI_NODE, rank, size, rank_domain_keys);
                 break;
             default:
                 MPI_Abort(MPI_COMM_WORLD, 999);
@@ -245,12 +249,28 @@ int main(int argc, char **argv) {
             writeSnapshot(rank, vis_step, local_ids, local_mass,
                           local_pos, local_vel, local_acc, out_dir);
 
+            if (fcPol == FCPolicy::LET) {
+                writeReceivedLETs(rank, vis_step, remote_nodes, remote_node_counts, global_bb, out_dir);
+            }
+
+            if (rank == 0 && !last_global_hist.empty()) {
+                // global_bb is computed right before tree building, so it's available and current.
+                writeHistogram(vis_step, last_global_hist, hist_global_bb, out_dir);
+            }
+
             MPI_Barrier(MPI_COMM_WORLD);
 
             if (rank == 0) {
                 updatePVDFile(args, size, vis_step, t, out_dir);
                 std::cout << "Saved frame " << vis_step << " at t=" << t << std::endl;
 
+                if (fcPol == FCPolicy::LET) {
+                    updateReceivedLETPVDFile(args, size, vis_step, t, out_dir);
+                }
+
+                if (!last_global_hist.empty()) {
+                    updateHistogramPVDFile(args, vis_step, t, out_dir);
+                }
                 // compute totals
                 long long total_us = agg_halfkick + agg_drift + agg_rebalance +
                                      agg_pretree + agg_build + agg_exchange +

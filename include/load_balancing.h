@@ -2,6 +2,7 @@
 
 #include "body.h"
 #include "morton_keys.h"
+#include <mpi.h>
 #include <vector>
 
 
@@ -21,4 +22,5 @@ void rebalance_bodies(
     std::vector<double> &local_mass,
     std::vector<Velocity> &local_vel,
     std::vector<uint64_t> &local_ids,
-    std::vector<std::vector<uint64_t>>& rank_domain_keys);
+    std::vector<std::vector<uint64_t>>& rank_domain_keys,
+    std::vector<std::pair<long long, int>>& global_hist_out);

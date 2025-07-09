@@ -22,6 +22,7 @@ std::vector<NodeRecord> generate_interaction_list(
 void exchange_LET_gather_remotes(
     const OctreeMap&                        local_tree,
     std::vector<NodeRecord>&                remote_nodes, // Output
+    std::vector<int>&                       recv_counts, //output
     const BoundingBox&                      global_bb,
     double                                  theta,
     MPI_Datatype                            node_type,
