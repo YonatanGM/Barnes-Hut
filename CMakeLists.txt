@@ -36,8 +36,12 @@ target_compile_options(solar_system_lib PUBLIC
   $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:
      -Wall -Wextra -Wpedantic -Werror>
 
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-include ${CMAKE_SOURCE_DIR}/include/fix_includes.h>
+
   # warnings  (all configs, MSVC)
   $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>
+
+
 
   # performance flags – **only in Release** and only for GCC/Clang
   $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>>:
