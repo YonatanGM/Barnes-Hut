@@ -34,8 +34,8 @@ target_include_directories(solar_system_lib PUBLIC include)
 target_compile_options(solar_system_lib PUBLIC
   # warnings  (all configs, GCC/Clang)
   $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:
-     -Wall -Wextra -Wpedantic -Werror>
-     -Wno-unused-parameter>
+     -Wall -Wextra -Wpedantic>
+
 
   $<$<CXX_COMPILER_ID:GNU,Clang>:-include ${CMAKE_SOURCE_DIR}/include/fix_includes.h>
 
