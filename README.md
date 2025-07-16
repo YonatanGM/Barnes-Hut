@@ -41,7 +41,7 @@ srun -N 4 ./simulate \
 srun -N 4 ./simulate \
     --file ../data/state_vectors_csvs/scenario2_300149.csv \
     --dt 1h --tend 1y --vs 7d --vs_dir sim_s2 \
-    --theta 1.05 --fc let_direct
+    --theta 1.05 --fc let
 ```
 
 To run with fewer bodies, add the `--bodies` option. For a full list of options, use `--help`.
