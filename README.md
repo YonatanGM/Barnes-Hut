@@ -31,7 +31,7 @@ The simulation supports several force calculation strategies via the `--fc` flag
 ```bash
 srun -N 4 ./simulate \
     --file ../data/state_vectors_csvs/scenario1_19054.csv \
-    --dt 1h --tend 12y --vs 2d --vs_dir sim_s1 \
+    --dt 1h --tend 12y --vs 2d --outdir sim_s1 \
     --theta 1.05 --fc let
 ```
 
@@ -40,7 +40,7 @@ srun -N 4 ./simulate \
 ```bash
 srun -N 4 ./simulate \
     --file ../data/state_vectors_csvs/scenario2_300149.csv \
-    --dt 1h --tend 1y --vs 7d --vs_dir sim_s2 \
+    --dt 1h --tend 1y --vs 7d --outdir sim_s2 \
     --theta 1.05 --fc let
 ```
 
