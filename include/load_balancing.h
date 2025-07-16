@@ -5,22 +5,32 @@
 #include <mpi.h>
 #include <vector>
 
-
-// void rebalance_bodies(
-//     int rank, int size,
-//     const CodesAndNorm &cn,
-//     std::vector<Position> &local_pos,
-//     std::vector<double> &local_mass,
-//     std::vector<Velocity> &local_vel,
-//     std::vector<uint64_t> &local_ids);
-
-
+/**
+ * @brief Redistributes bodies among MPI ranks based on a workload histogram
+ *
+ * This function performs a complete load balancing step:
+ * 1. Builds a global histogram of particle distribution
+ * 2. Calculates optimal splitters to divide the workload evenly
+ * 3. Uses MPI_Alltoallv to send and receive bodies, moving them to their new owner rank
+ *
+ * @param rank The MPI rank of the calling process.
+ * @param size The total number of MPI ranks.
+ * @param mortonData The Morton codes for the local particles.
+ * @param[in,out] local_pos On input, the local positions; on output, the new set of positions after redistribution.
+ * @param[in,out] local_mass On input/output, the corresponding local masses.
+ * @param[in,out] local_vel On input/output, the corresponding local velocities.
+ * @param[in,out] local_ids On input/output, the corresponding local particle IDs.
+ * @param[out] out_rank_domain_keys A map where key is rank and value is the list of bucket prefixes it owns
+ * @param[out] out_global_histogram The complete global histogram (count per bucket, assigned rank)
+ * @param bucket_bits The number of bits used to determine the histogram buckets (e.g., 18 for 2^18 buckets)
+ */
 void rebalance_bodies(
     int rank, int size,
-    const CodesAndNorm &cn,
+    std::vector<uint64_t> codes,
     std::vector<Position> &local_pos,
     std::vector<double> &local_mass,
     std::vector<Velocity> &local_vel,
     std::vector<uint64_t> &local_ids,
     std::vector<std::vector<uint64_t>>& rank_domain_keys,
-    std::vector<std::pair<long long, int>>& global_hist_out);
+    std::vector<std::pair<long long, int>>& global_hist_out,
+    int bucket_bits);

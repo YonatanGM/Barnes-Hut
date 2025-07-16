@@ -1,7 +1,7 @@
 # Parallel N-body Simulation
 
-[![Pipeline Status](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/badges/main/pipeline.svg)](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/-/pipelines)
-[![Coverage](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/badges/main/coverage.svg)](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/-/pipelines)
+<!-- [![Pipeline Status](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/badges/main/pipeline.svg)](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/-/pipelines)
+[![Coverage](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/badges/main/coverage.svg)](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/-/pipelines) -->
 
 ## How to build
 
@@ -14,81 +14,86 @@ cmake ..
 make
 ```
 
-This builds the executable and tests which you can run using `ctest`. To check test coverage, build using `cmake -DENABLE_COVERAGE=ON ..`, then run
-`make coverage`.
+This builds the main executable `simulate`.
 
 ## How to run
 
-The CSV files are in data/state_vectors_csvs. Run these commands from the build folder.
+The CSV files are located in the `data/state_vectors_csvs` directory. All commands should be run from the `build` folder.
 
-Scenario 1:
+The simulation supports several force calculation strategies via the `--fc` flag:
+*   `tree`: Baseline method where all ranks exchange their full local trees.
+*   `let`: Default method using Locally Essential Trees (LET) where remote interactions are handled by merging trees.
+*   `let_direct`: An alternative LET method where remote forces are calculated with a direct summation.
+
+
+#### Scenario 1:
 
 ```bash
-srun -N 4 ./simulate --file ../data/state_vectors_csvs/scenario1_19054.csv --dt 1h --t_end 12y --vs 2d --vs_dir sim_s1 --theta 1.05
+srun -N 4 ./simulate \
+    --file ../data/state_vectors_csvs/scenario1_19054.csv \
+    --dt 1h --tend 12y --vs 2d --vs_dir sim_s1 \
+    --theta 1.05 --fc let
 ```
 
-Scenario 2:
+#### Scenario 2:
 
 ```bash
-srun -N 4 ./simulate --file ../data/state_vectors_csvs/scenario2_300149.csv --dt 1h --t_end 1y --vs 7d --vs_dir sim_s2 --theta 1.05
+srun -N 4 ./simulate \
+    --file ../data/state_vectors_csvs/scenario2_300149.csv \
+    --dt 1h --tend 1y --vs 7d --vs_dir sim_s2 \
+    --theta 1.05 --fc let_direct
 ```
 
-To run with fewer bodies, add the --bodies option. For more details, use --help.
+To run with fewer bodies, add the `--bodies` option. For a full list of options, use `--help`.
 
-You can also use `sbatch scenario_1.sh` or `sbatch scenario_2.sh` to run the job. Timing results are based on these scripts.
+You can also use `sbatch scenario_1.sh` or `sbatch scenario_2.sh` to submit a job to the queue.
+
+## Approach
+
+This simulation uses a parallel Barnes-Hut algorithm with MPI and OpenMP for N-body problems.
+
+The main loop has several phases:
+
+1.  **Load Balancing:** To balance the work, particles are moved between MPI ranks every so often.
+    *   It maps particles to 1D space with Morton Z-order curves.
+    *   It builds a global histogram of where particles are.
+    *   It calculates new boundaries to divide the particle count evenly.
+    *   It moves particles to their new ranks with `MPI_Alltoallv`.
+
+2.  **Local Octree Construction:** After balancing, each rank builds an octree with just its own particles. This is done by sorting the particles by their Morton key and building the tree from the bottom up.
+
+3.  **Force Calculation:** The simulation has a few ways to calculate forces.
+    *   **Full Tree Exchange (`--fc tree`):** A basic method where every rank sends its full local tree to everyone else. Each rank then builds the same global tree and traverses it. This is simple but sends a lot of data.
+    *   **Locally Essential Tree (LET) (`--fc let` or `--fc let_direct`):** This approach sends less data.
+        *   Each rank finds the nodes (pseudo-leaves) from its tree that other ranks need to know about based on the Barnes-Hut opening angle (`θ`).
+        *   It sends only these "essential" nodes.
+        *   The receiving rank can either **merge** these nodes into its local tree (`let`) or calculate their forces with a **direct sum** (`let_direct`).
+
+4.  **Integration:** It uses a Kick-Drift-Kick (Leapfrog) integrator to update particle positions and velocities. OpenMP is used to parallelize the force calculations and updates on each rank.
+
+5.  **Visualization:** The program saves output that can be opened in ParaView. Each rank writes its own particle data to `.vtp` files. The root rank also creates `.pvd` timeline files to animate the particle snapshots, the load-balancing histograms, and the exchanged LET data for debugging.
+
 
 ## Generating the scenario files
 
-The orbital element CSVs are in data/orbital_elements_raw_csvs.
+The orbital element CSVs are in `data/orbital_elements_raw_csvs`.
 
-* For scenario 2, large asteroid data (300,000 bodies) comes from the JPL database.
-* Planets and moons, and small asteroid data are from Ilias.
+*   For scenario 2, large asteroid data (300,000 bodies) comes from the JPL database.
+*   Planets, moons, and small asteroid data are provided.
 
-To generate the state vector CSVs for each scenario, first convert the planet/moon and asteroid orbital element CSVs to state vectors, then combine them.
+To generate the state vector CSVs for each scenario, you can use the provided command-line conversion tool.
 
-There’s a command-line tool for this:
-
-To build:
+To build the tool:
 
 ```bash
 g++ -std=c++17 -o orbital_converter src/orbital_converter.cpp src/kepler_to_cartesian.cpp -I./include
 ```
 
-To run:
+To run the tool:
 
 ```bash
 ./orbital_converter <planets_and_moons.csv> <asteroids.csv> <output_dir>
 ```
 
-This will output combined state vector CSVs in the specified folder.
+This will output the combined state vector CSVs required for the simulation.
 
-## Result
-
-Scenario 1: 19,054 bodies in 1213.48 seconds (\~20 minutes)
-
-Scenario 2: 300,000 bodies in 1665.55 seconds (\~28 minutes)
-
-See the `result` folder for:
-
-* Scenario 1 animation
-* Final timestep CSVs for both scenarios
-* ParaView screenshots and energy plot
-
-See [performance\_analysis.md](performance_analysis.md) for benchmark results.
-
-## Approach
-
-* The root process broadcasts the total number of bodies, their masses, initial positions, and velocities to all MPI ranks using `MPI_Bcast`, so all ranks start with the same global data.
-* Masses, positions, velocities, names, and orbit classes are distributed to MPI ranks using `MPI_Scatterv`, giving each rank a subset of bodies to handle.
-* Each rank calculates the initial accelerations for its assigned bodies using their local data and global data (like positions and masses of all bodies) before entering the simulation loop.
-
-Inside the simulation loop:
-
-* Each rank performs a full-step position update and a half-step velocity update for its assigned bodies.
-* Updated positions are gathered globally across all ranks using `MPI_Allgatherv`, ensuring that every rank has the full updated state of all bodies needed for the next computation.
-* A second half-step velocity update is performed to finalize the integration step.
-* Accelerations are calculated for each body based on the updated global positions.
-* Global kinetic and potential energies are calculated by summing contributions from all ranks using `MPI_Allreduce`.
-* Each rank writes VTP files for its assigned bodies, while the root rank manages updates to the PVD file that aggregates all outputs.
-
-The acceleration calculations, position, and velocity updates are parallelized with OpenMP.

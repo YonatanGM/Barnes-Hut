@@ -6,24 +6,6 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build" FORCE)
 endif()
 
-# ------------------------------------------------------------------
-# Fetch oneTBB via CMake’s FetchContent
-# ------------------------------------------------------------------
-set(TBB_TEST        OFF CACHE BOOL "" FORCE)
-set(TBBMALLOC_BUILD OFF CACHE BOOL "" FORCE)
-set(TBB_BIND_BUILD  OFF CACHE BOOL "" FORCE)
-
-include(FetchContent)
-
-FetchContent_Declare(
-  oneTBB
-  GIT_REPOSITORY https://github.com/oneapi-src/oneTBB.git
-  GIT_TAG        v2022.2.0
-  GIT_SHALLOW    TRUE
-)
-set(FETCHCONTENT_QUIET OFF)
-FetchContent_MakeAvailable(oneTBB)
-
 # macOS OpenMP flags
 if(APPLE)
     set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/Cellar/libomp/19.1.4/include")
@@ -50,8 +32,16 @@ add_library(solar_system_lib STATIC
 target_compile_features(solar_system_lib PUBLIC cxx_std_17)
 target_include_directories(solar_system_lib PUBLIC include)
 target_compile_options(solar_system_lib PUBLIC
-  $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-Wall -Wextra -Wpedantic -Werror>
+  # warnings  (all configs, GCC/Clang)
+  $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:
+     -Wall -Wextra -Wpedantic -Werror>
+
+  # warnings  (all configs, MSVC)
   $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>
+
+  # performance flags – **only in Release** and only for GCC/Clang
+  $<$<AND:$<CONFIG:Release>,$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>>:
+     -march=native -ffast-math>
 )
 target_compile_definitions(solar_system_lib PUBLIC _USE_MATH_DEFINES)
 
@@ -61,10 +51,6 @@ target_link_libraries(solar_system_lib PUBLIC OpenMP::OpenMP_CXX)
 
 find_package(MPI REQUIRED)
 target_link_libraries(solar_system_lib PUBLIC MPI::MPI_CXX)
-
-# oneTBB
-# (fetched above via FetchContent, provides the TBB::tbb target)
-target_link_libraries(solar_system_lib PUBLIC TBB::tbb)
 
 # main executable
 add_executable(simulate src/main.cpp)

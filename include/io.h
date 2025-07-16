@@ -19,6 +19,13 @@ bool readCSV(
     int body_count = -1 // limit on the number of bodies to read
 );
 
+/**
+ * @brief Writes the simulation state for one rank to a VTP snapshot file.
+ * @param rank The rank of the calling process.
+ * @param step_counter The current visualization step number.
+ * @param ... (other params)
+ * @param output_dir The root directory for visualization files.
+ */
 void writeSnapshot(int rank, int vs_counter,
                    const std::vector<uint64_t>& local_ids,
                    const std::vector<double>& local_masses,
@@ -27,18 +34,40 @@ void writeSnapshot(int rank, int vs_counter,
                    const std::vector<Acceleration>& local_accelerations,
                    const std::string& vs_dir);
 
+/**
+ * @brief Creates or updates the main timeline (.pvd) file for particle snapshots.
+ *
+ * This function adds a new entry to the PVD file, pointing to the snapshot
+ * files that were just written for the current timestep.
+ *
+ * @param cli_args The parsed command-line arguments, used for generating a unique filename.
+ * @param num_ranks The total number of MPI ranks.
+ * @param step_counter The current visualization step number.
+ * @param current_time The current simulation time.
+ * @param output_dir The root directory for visualization files.
+ */
 void updatePVDFile(const cxxopts::ParseResult& args,
                    int size,
                    int vs_counter,
                    double current_time,
                    const std::string& vs_dir);
 
+
+/**
+ * @brief Writes the Locally Essential Tree (LET) nodes received by a rank to a VTU file.
+ *
+ * This is a visualization function to debug and analyze which pseudo-leaves
+ * each rank receives from its peers.
+ */
 void writeReceivedLETs(int rank, int vis_step,
                        const std::vector<NodeRecord>& received_nodes,
                        const std::vector<int>& recv_counts,
                        const BoundingBox& global_bb,
                        const std::string& vs_dir);
 
+/**
+ * @brief Creates or updates the timeline (.pvd) file for the LET visualization.
+ */
 void updateReceivedLETPVDFile(const cxxopts::ParseResult& args,
                               int size,
                               int vs_counter,

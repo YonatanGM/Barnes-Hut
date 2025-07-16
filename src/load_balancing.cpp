@@ -6,30 +6,30 @@
 
 void rebalance_bodies(
     int rank, int size,
-    const CodesAndNorm &cn,
+    std::vector<uint64_t> codes,
     std::vector<Position> &local_pos,
     std::vector<double> &local_mass,
     std::vector<Velocity> &local_vel,
     std::vector<uint64_t> &local_ids,
     std::vector<std::vector<uint64_t>>& rank_domain_keys,
-    std::vector<std::pair<long long, int>>& global_hist_out) {
+    std::vector<std::pair<long long, int>>& global_hist_out,
+    int bucket_bits) {
 
     (void)rank;
 
-    constexpr int BUCKET_BITS  = 18;            // 2^12 = 4096 buckets
-    constexpr int NUM_BUCKETS  = 1 << BUCKET_BITS;
+    int NUM_BUCKETS  = 1 << bucket_bits;
 
-    // Step 2: build local histogram & reduce to global
+    // build local histogram and reduce to global
     std::vector<long long> local_hist(NUM_BUCKETS, 0);
-    for (uint64_t key : cn.code) {
-        unsigned bucket_idx = key >> (63 - BUCKET_BITS);
+    for (uint64_t key : codes) {
+        unsigned bucket_idx = key >> (63 - bucket_bits);
         ++local_hist[bucket_idx];
     }
     std::vector<long long> global_hist(NUM_BUCKETS, 0);
     MPI_Allreduce(local_hist.data(), global_hist.data(), NUM_BUCKETS,
                   MPI_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
 
-    // Step 3: choose P‑1 splitter buckets (inclusive)
+    // choose P‑1 splitter buckets (inclusive)
     long long total_particles = std::accumulate(global_hist.begin(),
                                                 global_hist.end(), 0LL);
     const long long ideal = (total_particles + size - 1) / size; // ceil
@@ -55,17 +55,17 @@ void rebalance_bodies(
         global_hist_out[i].first = global_hist[i];
         global_hist_out[i].second = dest_rank;
 
-        // Only consider buckets that actually contain particles.
+        // Only consider buckets that actually contain particles
         if (global_hist[i] > 0) {
-            uint64_t bucket_prefix = static_cast<uint64_t>(i) << (63 - BUCKET_BITS);
+            uint64_t bucket_prefix = static_cast<uint64_t>(i) << (63 - bucket_bits);
             rank_domain_keys[dest_rank].push_back(bucket_prefix);
         }
     }
 
-    // Step 4: build send buffers  and Alltoallv migration
+    // build send buffers  and Alltoallv migration
     std::vector<int> send_counts(size, 0);
-    for (uint64_t key : cn.code) {
-        unsigned b = key >> (63 - BUCKET_BITS);
+    for (uint64_t key : codes) {
+        unsigned b = key >> (63 - bucket_bits);
         int dest = std::upper_bound(splitters.begin(), splitters.end(),
                                     static_cast<int>(b)) - splitters.begin();
         ++send_counts[dest];
@@ -85,7 +85,7 @@ void rebalance_bodies(
     // fill the send buffers in bucket order
     std::vector<int> cursor = sdispls;
     for (size_t i = 0; i < local_pos.size(); ++i) {
-        unsigned b = cn.code[i] >> (63 - BUCKET_BITS);
+        unsigned b = codes[i] >> (63 - bucket_bits);
         int dest = std::upper_bound(splitters.begin(), splitters.end(),
                                     static_cast<int>(b)) - splitters.begin();
         int idx = cursor[dest]++;

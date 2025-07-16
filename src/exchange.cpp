@@ -6,9 +6,9 @@
 
 
 
-void exchange_whole_trees(const OctreeMap &local_tree, OctreeMap &full_tree,
+void exchangeFullTrees(const OctreeMap &local_tree, OctreeMap &full_tree,
                           MPI_Datatype node_type, int /*rank*/, int size) {
-    std::vector<NodeRecord> send_buf = flattenTree(local_tree);
+    std::vector<NodeRecord> send_buf = serializeTreeToRecords(local_tree);
     int send_cnt = static_cast<int>(send_buf.size());
 
     std::vector<int> recv_counts(size);
@@ -25,24 +25,25 @@ void exchange_whole_trees(const OctreeMap &local_tree, OctreeMap &full_tree,
                    MPI_COMM_WORLD);
 
     full_tree.clear();
-    mergeIntoTree(full_tree, recv_buf);
+    mergeRecordsIntoTree(full_tree, recv_buf);
 }
 
-void exchange_LET_gather_remotes(
+void exchangeEssentialTrees(
     const OctreeMap&                        local_tree,
-    std::vector<NodeRecord>&                remote_nodes, // Output
-    std::vector<int>&                       recv_counts, // Output
+    std::vector<NodeRecord>&                remote_nodes,
+    std::vector<int>&                       recv_counts,
     const BoundingBox&                      global_bb,
     double                                  theta,
     MPI_Datatype                            node_type,
     int                                     rank,
     int                                     size,
-    const std::vector<std::vector<uint64_t>>& rank_domain_keys)
+    const std::vector<std::vector<uint64_t>>& rank_domain_keys,
+    int                                     max_traversal_depth)
 {
     constexpr int BUCKET_BITS  = 18;
     constexpr int BUCKET_DEPTH = BUCKET_BITS/3;
 
-    // 1) Build per-rank bucket AABBs with correct anisotropic dimensions
+    // build per rank bucket AABBs with correct anisotropic dimensions
     std::vector<std::vector<BoundingBox>> bucket_boxes(size);
     double dx   = global_bb.max.x - global_bb.min.x;
     double dy   = global_bb.max.y - global_bb.min.y;
@@ -67,15 +68,15 @@ void exchange_LET_gather_remotes(
       }
     }
 
-    // 2) Generate per-destination send-lists using the corrected interaction list function
+    // Generate per destination send lists using the corrected interaction list function
     std::vector<std::vector<NodeRecord>> send_lists(size);
     double theta2 = theta*theta;
     for(int dest=0; dest<size; ++dest){
         if(dest==rank) continue;
-        send_lists[dest] = generate_interaction_list(local_tree, bucket_boxes[dest], global_bb, theta2);
+        send_lists[dest] = createInteractionListForRank(local_tree, bucket_boxes[dest], global_bb, theta2, max_traversal_depth);
     }
 
-    // 3) Perform MPI_Alltoallv to exchange LET data
+    // Perform MPI_Alltoallv to exchange LET data
     std::vector<int> send_counts(size);
     recv_counts.resize(size);
 
@@ -107,48 +108,50 @@ void exchange_LET_gather_remotes(
     MPI_Alltoallv(send_buffer.data(), send_counts.data(), sdispls.data(), node_type,
                   remote_nodes.data(), recv_counts.data(), rdispls.data(), node_type,
                   MPI_COMM_WORLD);
+
 }
 
 
-std::vector<NodeRecord> generate_interaction_list(
+std::vector<NodeRecord> createInteractionListForRank(
     const OctreeMap&                      tree,
     const std::vector<BoundingBox>&       remote_boxes,
     const BoundingBox&                    global_bb,
-    double                                theta2)
+    double                                theta2,
+    int                                   max_traversal_depth)
 {
     if (tree.empty() || remote_boxes.empty())
         return {};
 
     robin_hood::unordered_set<OctreeKey, OctreeKeyHash> keep;
+
+    //  256 seems safe for depth ≤ 21 (7*d+1 bound)
     std::array<OctreeKey, 256> stk;
     int top = 0;
     if (tree.count({0ULL, 0}))
-        stk[top++] = {0ULL, 0};
+        stk[top++] = {0ULL, 0}; // push root
 
     while (top > 0) {
         OctreeKey k = stk[--top];
-        BoundingBox node_bb = key_to_bounding_box(k, global_bb);
+        BoundingBox node_bb = getBoundingBoxForCell(k, global_bb);
 
-        // Use the largest side length squared for the most conservative MAC.
+        // Barnes Hut opening test
         double sx = node_bb.max.x - node_bb.min.x;
         double sy = node_bb.max.y - node_bb.min.y;
         double sz = node_bb.max.z - node_bb.min.z;
-        double s = std::max({sx, sy, sz});
-        double s_squared = s * s;
+        double s  = std::max({sx, sy, sz});
+        double s2 = s * s;                // largest side squared
 
-        bool should_open = false;
-        if (k.depth < 21) { // Max depth is 21, so leaves can't be opened
-            for (const auto& remote_bucket : remote_boxes) {
-                double d2 = min_distance_sq(node_bb, remote_bucket);
-                if (s_squared >= theta2 * d2) {
-                    should_open = true;
-                    break;
-                }
+        bool bhFails = false;
+        for (const auto& bucket : remote_boxes) {
+            double d2 = min_distance_sq(node_bb, bucket);
+            if (s2 >= theta2 * d2) {      // Barnes–Hut criterion
+                bhFails = true;
+                break;
             }
         }
 
-        if (should_open) {
-            // OPEN: Node is too close. Push its children to continue the test.
+        if (bhFails && k.depth < max_traversal_depth) {
+            // criterion failed  and we are still allowed to descend
             uint8_t cd = k.depth + 1;
             uint64_t stride = 1ULL << (63 - 3 * cd);
             for (uint8_t oc = 0; oc < 8; ++oc) {
@@ -159,16 +162,15 @@ std::vector<NodeRecord> generate_interaction_list(
                 }
             }
         } else {
-            // ACCEPT: This node is a valid pseudoleaf for the entire remote domain.
-            // Add ONLY this node to the keep set.
+            // Accept, either BH test passed or we hit max_traversal_depth.
             keep.insert(k);
         }
     }
 
     std::vector<NodeRecord> out;
     out.reserve(keep.size());
-    for (auto& k : keep) {
-        auto& n = tree.at(k);
+    for (const auto& k : keep) {
+        const auto& n = tree.at(k);
         out.push_back({k.prefix, k.depth, n.mass, n.comX, n.comY, n.comZ});
     }
     return out;

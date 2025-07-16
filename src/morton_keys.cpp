@@ -6,8 +6,8 @@
 
 
 // Spreads the lower 21 bits of an integer to a 63-bit value,
-// inserting two zero bits between each original bit.
-// This is used to interleave the x, y, and z coordinates.
+// inserting two zero bits between each original bit
+// This is used to interleave the x, y, and z coordinates
 uint64_t spread21(uint32_t v) {
     uint64_t x = v & 0x1FFFFF; // Mask to 21 bits
     x = (x | (x << 32)) & 0x1F00000000FFFFULL;
@@ -31,7 +31,7 @@ uint64_t mortonPrefix(uint64_t code, int depth) {
     return code & (~0ULL << shift);
 }
 
-// Pulls the 21 x, y, or z bits back out of a 63-bit Morton word.
+// Pulls the 21 x, y, or z bits back out of a 63-bit Morton code
 uint32_t compact21(uint64_t m) {
     m &= 0x1249249249249249ULL;
     m = (m ^ (m >>  2)) & 0x10c30c30c30c30c3ULL;
@@ -42,7 +42,7 @@ uint32_t compact21(uint64_t m) {
     return static_cast<uint32_t>(m);
 }
 
-// De-interleaves the top 3*depth bits of the prefix into (ix,iy,iz) integer coordinates.
+// Deinterleaves the top 3*depth bits of the prefix into (ix,iy,iz) integer coordinates
 void decodePrefix(uint64_t prefix, int depth, uint32_t &ix, uint32_t &iy, uint32_t &iz) {
     if (depth == 0) { ix = iy = iz = 0; return; }
 
@@ -53,27 +53,26 @@ void decodePrefix(uint64_t prefix, int depth, uint32_t &ix, uint32_t &iy, uint32
     iz = compact21(bits >> 2);
 }
 
-// Decodes a Morton key to the position of its minimum corner in normalized [0,1) space.
+// Decodes a morton key to the position of its minimum corner in normalized [0,1) space.
 Position key_to_normalized_position(uint64_t code, int depth) {
     uint32_t ix, iy, iz;
     decodePrefix(code, depth, ix, iy, iz);
-    const double scale = 1.0 / static_cast<double>(1ULL << depth); // 1 / 2ᵈ
+    const double scale = 1.0 / static_cast<double>(1ULL << depth); // 1 / 2^d
     return { ix * scale, iy * scale, iz * scale };
 }
 
 
-CodesAndNorm mortonCodes(const std::vector<Position>& raw, const BoundingBox& box)
+std::vector<uint64_t> generateMortonCodes(const std::vector<Position>& raw, const BoundingBox& box)
 {
     const std::size_t n = raw.size();
-    CodesAndNorm out{ std::vector<uint64_t>(n), std::vector<Position>(n) };
-    if (!n) return out;
+    std::vector<uint64_t> out_codes(n);
+    if (!n) return out_codes;
 
-    // CORRECTED: Use box.min.x, box.max.x, etc.
     const double dx = (box.max.x == box.min.x) ? 1.0 : (box.max.x - box.min.x);
     const double dy = (box.max.y == box.min.y) ? 1.0 : (box.max.y - box.min.y);
     const double dz = (box.max.z == box.min.z) ? 1.0 : (box.max.z - box.min.z);
 
-    constexpr uint32_t Q = (1u << 21);   // 21-bit quantiser
+    constexpr uint32_t Q = (1u << 21);
 
     auto norm = [](double v, double lo, double span)
     {
@@ -85,68 +84,15 @@ CodesAndNorm mortonCodes(const std::vector<Position>& raw, const BoundingBox& bo
 
     for (std::size_t i = 0; i < n; ++i)
     {
-        // CORRECTED: Use box.min.x, box.min.y, etc.
         double xn = norm(raw[i].x, box.min.x, dx);
         double yn = norm(raw[i].y, box.min.y, dy);
         double zn = norm(raw[i].z, box.min.z, dz);
 
-        out.norm[i] = { xn, yn, zn };
-
         uint32_t xi = static_cast<uint32_t>(xn * Q);
         uint32_t yi = static_cast<uint32_t>(yn * Q);
         uint32_t zi = static_cast<uint32_t>(zn * Q);
-        out.code[i] = morton63(xi, yi, zi);
+        out_codes[i] = morton63(xi, yi, zi);
     }
-    return out;
+    return out_codes;
 }
 
-
-
-// std::vector<uint64_t> mortonCodes(const std::vector<Position>& pos) {
-//     const size_t n = pos.size();
-//     std::vector<uint64_t> codes(n);
-//     if (n == 0) return codes;
-
-//     // 1. Find the bounding box of all positions
-//     double x_min = std::numeric_limits<double>::max();
-//     double y_min = std::numeric_limits<double>::max();
-//     double z_min = std::numeric_limits<double>::max();
-//     double x_max = std::numeric_limits<double>::lowest();
-//     double y_max = std::numeric_limits<double>::lowest();
-//     double z_max = std::numeric_limits<double>::lowest();
-
-//     for (const auto& p : pos) {
-//         x_min = std::min(x_min, p.x);
-//         y_min = std::min(y_min, p.y);
-//         z_min = std::min(z_min, p.z);
-//         x_max = std::max(x_max, p.x);
-//         y_max = std::max(y_max, p.y);
-//         z_max = std::max(z_max, p.z);
-//     }
-
-//     // 2. Determine the span of the bounding box, avoiding division by zero
-//     double dx = (x_max == x_min) ? 1.0 : x_max - x_min;
-//     double dy = (y_max == y_min) ? 1.0 : y_max - y_min;
-//     double dz = (z_max == z_min) ? 1.0 : z_max - z_min;
-
-//     // Max value for a 21-bit integer
-//     constexpr uint32_t Q = (1u << 21);
-
-//     // 3. Normalize positions and convert to Morton codes
-//     auto normalize = [&](double val, double min_val, double span) {
-//         double t = (val - min_val) / span;
-//         if (t <= 0.0) return 0.0;
-//         // Clamp to just below 1.0 to ensure the integer value fits in 21 bits
-//         if (t >= 1.0) return std::nextafter(1.0, 0.0);
-//         return t;
-//     };
-
-//     for (size_t i = 0; i < n; ++i) {
-//         uint32_t xi = static_cast<uint32_t>(normalize(pos[i].x, x_min, dx) * Q);
-//         uint32_t yi = static_cast<uint32_t>(normalize(pos[i].y, y_min, dy) * Q);
-//         uint32_t zi = static_cast<uint32_t>(normalize(pos[i].z, z_min, dz) * Q);
-//         codes[i] = morton63(xi, yi, zi);
-//     }
-
-//     return codes;
-// }

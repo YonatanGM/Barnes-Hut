@@ -3,34 +3,31 @@
 #include <numeric>
 #include <vector>
 #include <iostream>
-#include <oneapi/tbb/parallel_sort.h>
 #include <omp.h>
 #include <morton_keys.h>
 #include <chrono>
 
+constexpr uint8_t BH_MAX_DEPTH = 21;
 
 
-// ── Optimised, serial aggregation ───────────────────────────────────
-OctreeMap buildOctree1(const std::vector<uint64_t>& mortonCodes,
+OctreeMap buildOctreeBottomUp(const std::vector<uint64_t>& generateMortonCodes,
                                const std::vector<Position>& positions,
                                const std::vector<double>&   masses)
 {
-    const size_t N = mortonCodes.size();
+    const size_t N = generateMortonCodes.size();
     if (N == 0) return {};
 
     constexpr uint8_t MAX_DEPTH = 21;
     OctreeMap tree;
     tree.reserve(N * 2);                // heuristic
 
-    /* ----------------------------------------------------------------
-       1. Insert / accumulate leaves and record their keys
-       ---------------------------------------------------------------- */
+    // 1. Insert / accumulate leaves and record their keys
     std::vector<OctreeKey> currentKeys;
     currentKeys.reserve(N);
 
     for (size_t i = 0; i < N; ++i)
     {
-        OctreeKey leaf{ mortonCodes[i], MAX_DEPTH };
+        OctreeKey leaf{ generateMortonCodes[i], MAX_DEPTH };
         OctreeNode& n = tree[leaf];      // create/find leaf
         double m      = masses[i];
         n.mass += m;
@@ -47,9 +44,8 @@ OctreeMap buildOctree1(const std::vector<uint64_t>& mortonCodes,
     currentKeys.erase(std::unique(currentKeys.begin(), currentKeys.end()),
                       currentKeys.end());
 
-    /* ----------------------------------------------------------------
-       2. Bottom-up: generate parents only from keys we have
-       ---------------------------------------------------------------- */
+
+    // 2. Bottom up, generate parents only from keys we have
     for (int depth = MAX_DEPTH - 1; depth >= 0; --depth)
     {
         if (currentKeys.empty()) break;
@@ -69,10 +65,10 @@ OctreeMap buildOctree1(const std::vector<uint64_t>& mortonCodes,
         parentKeys.erase(std::unique(parentKeys.begin(), parentKeys.end()),
                          parentKeys.end());
 
-        // 2b. Aggregate child → parent  (serial, race-free)
+        // 2b. Aggregate child into parent
         for (const auto& pk : parentKeys)
         {
-            OctreeNode& p = tree[pk];    // create/find parent
+            OctreeNode& p = tree[pk];    // create or find parent
 
             for (int oc = 0; oc < 8; ++oc)
             {
@@ -84,7 +80,7 @@ OctreeMap buildOctree1(const std::vector<uint64_t>& mortonCodes,
 
                 const OctreeNode& c = it->second;
                 p.mass  += c.mass;
-                p.comX  += c.comX;      // fixed copy
+                p.comX  += c.comX;
                 p.comY  += c.comY;
                 p.comZ  += c.comZ;
             }
@@ -94,9 +90,8 @@ OctreeMap buildOctree1(const std::vector<uint64_t>& mortonCodes,
         currentKeys.swap(parentKeys);
     }
 
-    /* ----------------------------------------------------------------
-       3. Finalise centre-of-mass for every node
-       ---------------------------------------------------------------- */
+
+    // 3. Finalise COM for every node
     for (auto& kv : tree)
     {
         OctreeNode& n = kv.second;
@@ -112,84 +107,12 @@ OctreeMap buildOctree1(const std::vector<uint64_t>& mortonCodes,
 }
 
 
-OctreeMap buildOctree2(
-    const std::vector<uint64_t>& mortonCodes,
-    const std::vector<Position>& positions,
-    const std::vector<double>&   masses) {
-
-    const size_t N = mortonCodes.size();
-    if (N == 0) return {};
-
-    OctreeMap tree;
-    constexpr uint8_t MAX_DEPTH = 21;
-
-    // 1. Create leaf nodes and insert them into the tree
-    for (size_t i = 0; i < N; ++i) {
-        OctreeKey leaf_key = {mortonCodes[i], MAX_DEPTH};
-        OctreeNode& node = tree[leaf_key]; // Creates node if it doesn't exist
-
-        // Accumulate mass and weighted position for center-of-mass calculation
-        node.mass += masses[i];
-        node.comX += positions[i].x * masses[i];
-        node.comY += positions[i].y * masses[i];
-        node.comZ += positions[i].z * masses[i];
-    }
-
-    // 2. Build internal nodes from the bottom up
-    // Iterate from the level just above the leaves up to the root.
-    for (int d = MAX_DEPTH - 1; d >= 0; --d) {
-        std::vector<OctreeKey> parent_keys;
-        // Find all unique parent keys at this level
-        for (const auto& [key, node] : tree) {
-            if (key.depth == d + 1) {
-                parent_keys.push_back({mortonPrefix(key.prefix, d), (uint8_t)d});
-            }
-        }
-        // Sort and remove duplicates
-        std::sort(parent_keys.begin(), parent_keys.end(), [](const auto& a, const auto& b) {
-            return a.prefix < b.prefix;
-        });
-        parent_keys.erase(std::unique(parent_keys.begin(), parent_keys.end()), parent_keys.end());
-
-        // For each unique parent, find its children and aggregate their properties
-        for (const auto& p_key : parent_keys) {
-            OctreeNode& parent_node = tree[p_key];
-
-            // Iterate through all 8 possible child octants
-            for (int octant = 0; octant < 8; ++octant) {
-                uint64_t child_prefix = p_key.prefix | (static_cast<uint64_t>(octant) << (63 - 3 * (d + 1)));
-                OctreeKey child_key = {child_prefix, (uint8_t)(d + 1)};
-
-                auto it = tree.find(child_key);
-                if (it != tree.end()) {
-                    const OctreeNode& child_node = it->second;
-                    parent_node.mass += child_node.mass;
-                    parent_node.comX += child_node.comX;
-                    parent_node.comY += child_node.comY;
-                    parent_node.comZ += child_node.comZ;
-                }
-            }
-        }
-    }
-
-    // 3. Finalize center-of-mass calculation for all nodes
-    for (auto& [key, node] : tree) {
-        if (node.mass > 0) {
-            node.comX /= node.mass;
-            node.comY /= node.mass;
-            node.comZ /= node.mass;
-        }
-    }
-
-    return tree;
-}
-
 // Compare two flattened octree vectors
 void compareFlattened(const std::vector<NodeRecord> A,
                       const std::vector<NodeRecord> B,
                       double tol)
 {
-    // 1) sort by (depth,prefix)
+    // sort by (depth,prefix)
     auto cmp = [](auto const &a, auto const &b) {
         if (a.depth != b.depth) return a.depth < b.depth;
         return a.prefix < b.prefix;
@@ -198,7 +121,7 @@ void compareFlattened(const std::vector<NodeRecord> A,
     std::sort(vA.begin(), vA.end(), cmp);
     std::sort(vB.begin(), vB.end(), cmp);
 
-    // 2) walk them in lock-step
+    // walk them in lock-step
     size_t i = 0, n = std::min(vA.size(), vB.size());
     bool allGood = true;
     for (; i < n; ++i) {
@@ -227,7 +150,7 @@ void compareFlattened(const std::vector<NodeRecord> A,
         }
     }
 
-    // 3) check for size mismatches
+    // check for size mismatches
     if (vA.size() != vB.size()) {
         std::printf("Size mismatch: A has %zu nodes, B has %zu nodes\n",
                     vA.size(), vB.size());
@@ -243,7 +166,7 @@ void compareFlattened(const std::vector<NodeRecord> A,
 
 
 
-std::vector<NodeRecord> flattenTree(const OctreeMap& tree) {
+std::vector<NodeRecord> serializeTreeToRecords(const OctreeMap& tree) {
     std::vector<NodeRecord> out;
     out.reserve(tree.size());
     for (const auto& [key, node] : tree) {
@@ -252,7 +175,7 @@ std::vector<NodeRecord> flattenTree(const OctreeMap& tree) {
     return out;
 }
 
-void mergeIntoTree(OctreeMap& tree, const std::vector<NodeRecord>& records) {
+void mergeRecordsIntoTree(OctreeMap& tree, const std::vector<NodeRecord>& records) {
     for (const auto& r : records) {
         OctreeKey key = {r.prefix, r.depth};
         OctreeNode& node = tree[key]; // Creates node if it doesn't exist or finds existing one
@@ -313,3 +236,87 @@ void printTree(const char* title, const OctreeMap& tree)
     }
 }
 
+
+
+
+OctreeMap buildTreeFromPseudoLeaves(const std::vector<NodeRecord>& remote_nodes)
+{
+    OctreeMap tree;
+    if (remote_nodes.empty()) {
+        return tree;
+    }
+
+    tree.reserve(remote_nodes.size() * 4); // conservative reservation
+
+    // Insert and accumulate all remote nodes
+    // First, insert all nodes from the input list. This correctly handles the
+    // case where multiple ranks send a node with the same key, by summing
+    // their mass and mass-weighted CoM contributions
+    for (const auto& r : remote_nodes) {
+        double m = r.mass;
+        if (!(m > 0.0) || !std::isfinite(m)) continue;
+
+        uint8_t d = r.depth > BH_MAX_DEPTH ? BH_MAX_DEPTH : r.depth;
+        OctreeKey k{mortonPrefix(r.prefix, d), d};
+
+        OctreeNode& n = tree[k];
+        n.mass += m;
+        n.comX += r.comX * m;
+        n.comY += r.comY * m;
+        n.comZ += r.comZ * m;
+        n.is_pseudo = true;
+    }
+
+    // Create all ancestor nodes
+    // Now, for every node we just inserted, we ensure its parents exist by
+    // walking up to the root. We only need to create the keys; the mass
+    // aggregation will happen in the next step.
+    OctreeMap temp_ancestors;
+    for (const auto& kv : tree) {
+        const OctreeKey& k = kv.first;
+        for (int d = k.depth - 1; d >= 0; --d) {
+            OctreeKey parent_key{mortonPrefix(k.prefix, d), (uint8_t)d};
+            // The [] operator creates the node if it doesn't exist.
+            temp_ancestors[parent_key];
+        }
+    }
+    tree.insert(temp_ancestors.begin(), temp_ancestors.end());
+
+
+    // Aggregate mass bottom up
+    // Now that all nodes (leaves and ancestors) exist in the tree, we can
+    // iterate from the deepest level upwards and sum the children's contributions
+    // into their parents.
+    for (int d = BH_MAX_DEPTH; d > 0; --d) {
+        for (const auto& kv : tree) {
+            const OctreeKey& child_key = kv.first;
+            if (child_key.depth != d) continue;
+
+            // Find the parent and add this child's contribution.
+            OctreeKey parent_key = {mortonPrefix(child_key.prefix, d - 1), (uint8_t)(d - 1)};
+            auto it = tree.find(parent_key);
+            if (it != tree.end()) {
+                OctreeNode& parent_node = it->second;
+                const OctreeNode& child_node = kv.second;
+
+                parent_node.mass += child_node.mass;
+                parent_node.comX += child_node.comX; // Already mass-weighted
+                parent_node.comY += child_node.comY;
+                parent_node.comZ += child_node.comZ;
+            }
+        }
+    }
+
+
+    // After all aggregation is complete, divide by mass to get the final COM
+    for (auto& kv : tree) {
+        OctreeNode& n = kv.second;
+        if (n.mass > 1e-12) {
+            n.comX /= n.mass;
+            n.comY /= n.mass;
+            n.comZ /= n.mass;
+        }
+    }
+
+    return tree;
+}

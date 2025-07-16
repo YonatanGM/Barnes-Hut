@@ -79,10 +79,6 @@ bool readCSV(
 }
 
 
-/**
- * @brief Writes a snapshot file for one rank in VTP format.
- * Adapted from your original writeVTPFile.
- */
 void writeSnapshot(int rank, int vs_counter,
                    const std::vector<uint64_t>& local_ids,
                    const std::vector<double>& local_masses,
@@ -310,9 +306,9 @@ void writeReceivedLETs(int rank, int vis_step,
     namespace fs = std::filesystem;
 
     int numNodes = static_cast<int>(received_nodes.size());
-    if (numNodes == 0) return; // This rank received nothing, so don't write a file.
+    if (numNodes == 0) return; // This rank received nothing, so don't write a file
 
-    // Each rank writes to its own directory.
+    // Each rank writes to its own directory
     fs::path rank_dir = fs::path(vs_dir) / std::to_string(rank);
     fs::create_directories(rank_dir);
     std::string filename = (rank_dir / ("received_lets." + std::to_string(vis_step) + ".vtu")).string();
@@ -331,7 +327,6 @@ void writeReceivedLETs(int rank, int vis_step,
     piece->SetAttribute("NumberOfCells", numNodes);
     uGrid->InsertEndChild(piece);
 
-    // --- CellData: The attributes for each box ---
     XMLElement* cellData = doc.NewElement("CellData");
     piece->InsertEndChild(cellData);
 
@@ -340,6 +335,8 @@ void writeReceivedLETs(int rank, int vis_step,
     source_ranks.reserve(numNodes);
     std::vector<double> let_masses;
     let_masses.reserve(numNodes);
+    std::vector<int> receiving_ranks(numNodes, rank);
+
     int node_idx = 0;
     for (int r = 0; r < static_cast<int>(recv_counts.size()); ++r) {
         for (int i = 0; i < recv_counts[r]; ++i) {
@@ -373,8 +370,8 @@ void writeReceivedLETs(int rank, int vis_step,
 
     writeIntArray("source_rank", source_ranks);
     writeDoubleArray("mass", let_masses);
-
-    // --- Points: The 8 corners of each bounding box ---
+    writeIntArray("receiving_rank", receiving_ranks);
+    // Points: The 8 corners of each bounding box
     XMLElement* points = doc.NewElement("Points");
     piece->InsertEndChild(points);
     XMLElement* da_points = doc.NewElement("DataArray");
@@ -383,7 +380,7 @@ void writeReceivedLETs(int rank, int vis_step,
     da_points->SetAttribute("format", "ascii");
     std::ostringstream ss_points;
     for (const auto& node : received_nodes) {
-        BoundingBox bb = key_to_bounding_box({node.prefix, node.depth}, global_bb);
+        BoundingBox bb = getBoundingBoxForCell({node.prefix, node.depth}, global_bb);
         ss_points << bb.min.x << " " << bb.min.y << " " << bb.min.z << "\n";
         ss_points << bb.max.x << " " << bb.min.y << " " << bb.min.z << "\n";
         ss_points << bb.min.x << " " << bb.max.y << " " << bb.min.z << "\n";
@@ -396,7 +393,7 @@ void writeReceivedLETs(int rank, int vis_step,
     da_points->InsertEndChild(doc.NewText(ss_points.str().c_str()));
     points->InsertEndChild(da_points);
 
-    // --- Cells: Topology defining how points form boxes ---
+    // Cells: Topology defining how points form boxes
     XMLElement* cells = doc.NewElement("Cells");
     piece->InsertEndChild(cells);
 
@@ -442,11 +439,11 @@ void updateReceivedLETPVDFile(const cxxopts::ParseResult& args,
                               int size,
                               int vs_counter,
                               double current_time,
-                              const std::string& sanity_dir) // Correctly uses sanity_dir
+                              const std::string& sanity_dir)
 {
     using namespace tinyxml2;
 
-    // This logic to generate a unique filename is correct and remains the same.
+
     std::string input_stem = std::filesystem::path(args["file"].as<std::string>()).stem().string();
     std::string dt_str = args["dt"].as<std::string>();
     std::string tend_str = args["tend"].as<std::string>();
@@ -468,34 +465,30 @@ void updateReceivedLETPVDFile(const cxxopts::ParseResult& args,
     XMLElement* vtkFile = nullptr;
     XMLElement* collection = nullptr;
 
-    // --- START OF CORRECTED LOGIC ---
-    // If this is the first visualization step (vs_counter is 0),
-    // we ALWAYS create a new file, discarding any old one.
+
     if (vs_counter == 0) {
-        // Create the root elements for a new file.
+        // Create the root elements for a new file
         vtkFile = doc.NewElement("VTKFile");
         vtkFile->SetAttribute("type", "Collection");
         doc.InsertFirstChild(vtkFile);
         collection = doc.NewElement("Collection");
         vtkFile->InsertEndChild(collection);
     }
-    // Otherwise, for all subsequent steps, we load and append.
+    // Otherwise, load and append
     else {
         XMLError e = doc.LoadFile(pvdPath.c_str());
-
-        // If loading fails for any reason on a later step, it's an error.
         if (e != XML_SUCCESS) {
             std::cerr << "Error: Could not load LET PVD file " << pvdPath << " on step " << vs_counter << std::endl;
-            return; // Abort this write
+            return;
         }
 
-        // Find the existing collection to append to.
+        // Find the existing collection to append to
         vtkFile = doc.FirstChildElement("VTKFile");
         if (vtkFile) {
             collection = vtkFile->FirstChildElement("Collection");
         }
 
-        // If the file is corrupted and has no collection, we can't proceed.
+        // If the file is corrupted and has no collection, we can't proceed
         if (!collection) {
             std::cerr << "Error: LET PVD file " << pvdPath << " is corrupted." << std::endl;
             return;
@@ -507,7 +500,7 @@ void updateReceivedLETPVDFile(const cxxopts::ParseResult& args,
         dataSet->SetAttribute("timestep", current_time);
         dataSet->SetAttribute("part", r);
         std::ostringstream fileRef;
-        fileRef << r << "/received_lets." << vs_counter << ".vtu"; // Point to the new files
+        fileRef << r << "/received_lets." << vs_counter << ".vtu";
         dataSet->SetAttribute("file", fileRef.str().c_str());
         collection->InsertEndChild(dataSet);
     }
@@ -532,11 +525,10 @@ void writeHistogram(int vis_step,
     using namespace tinyxml2;
     namespace fs = std::filesystem;
 
-    // These constants MUST match the ones in load_balancing.cpp
     constexpr int BUCKET_BITS = 18;
     constexpr int BUCKET_DEPTH = BUCKET_BITS / 3;
 
-    // Step 1: Collect data only for the non-empty histogram cells
+    // Collect data only for the non-empty histogram cells
     std::vector<BoundingBox> cell_boxes;
     std::vector<long long> cell_counts;
     std::vector<int> cell_ranks;
@@ -545,7 +537,7 @@ void writeHistogram(int vis_step,
         if (hist[i].first > 0) { // .first is particle_count
             uint64_t prefix = static_cast<uint64_t>(i) << (63 - BUCKET_BITS);
             OctreeKey key = {prefix, (uint8_t)BUCKET_DEPTH};
-            cell_boxes.push_back(key_to_bounding_box(key, global_bb));
+            cell_boxes.push_back(getBoundingBoxForCell(key, global_bb));
             cell_counts.push_back(hist[i].first);
             cell_ranks.push_back(hist[i].second); // .second is assigned_rank
         }
@@ -554,12 +546,11 @@ void writeHistogram(int vis_step,
     int numCells = static_cast<int>(cell_boxes.size());
     if (numCells == 0) return;
 
-    // Step 2: Set up the output file path. This is a single, global file.
     fs::path hist_data_dir = fs::path(out_dir) / "histograms";
     fs::create_directories(hist_data_dir);
     std::string filename = (hist_data_dir / ("histogram." + std::to_string(vis_step) + ".vtu")).string();
 
-    // Step 3: Write the VTK Unstructured Grid file
+    // Write the VTK Unstructured Grid file
     XMLDocument doc;
     XMLElement* vtkFile = doc.NewElement("VTKFile");
     vtkFile->SetAttribute("type", "UnstructuredGrid");
@@ -574,7 +565,7 @@ void writeHistogram(int vis_step,
     piece->SetAttribute("NumberOfCells", numCells);
     uGrid->InsertEndChild(piece);
 
-    // --- CellData ---
+    // CellData
     XMLElement* cellData = doc.NewElement("CellData");
     piece->InsertEndChild(cellData);
 
@@ -602,7 +593,7 @@ void writeHistogram(int vis_step,
     writeLongArray("particle_count", cell_counts);
     writeIntArray("assigned_rank", cell_ranks);
 
-    // --- Points (8 corners per box) ---
+    // Points (8 corners per box)
     XMLElement* points = doc.NewElement("Points");
     piece->InsertEndChild(points);
     XMLElement* da_points = doc.NewElement("DataArray");
@@ -623,7 +614,7 @@ void writeHistogram(int vis_step,
     da_points->InsertEndChild(doc.NewText(ss_points.str().c_str()));
     points->InsertEndChild(da_points);
 
-    // --- Cells (connectivity, offsets, types) ---
+    // Cells (connectivity, offsets, types)
     XMLElement* cells = doc.NewElement("Cells");
     piece->InsertEndChild(cells);
 
@@ -687,7 +678,6 @@ void updateHistogramPVDFile(const cxxopts::ParseResult& args,
     XMLDocument doc;
     XMLElement* collection = nullptr;
 
-    // If it's the first step, create a new file. Otherwise, load and append.
     if (vs_counter == 0) {
         XMLElement* vtkFile = doc.NewElement("VTKFile");
         vtkFile->SetAttribute("type", "Collection");
@@ -719,93 +709,3 @@ void updateHistogramPVDFile(const cxxopts::ParseResult& args,
 
     doc.SaveFile(pvdPath.c_str());
 }
-// bool readCSV(
-//     const std::string& filename,
-//     std::vector<uint64_t>& ids,
-//     std::vector<double>& masses,
-//     std::vector<Position>& positions,
-//     std::vector<Velocity>& velocities,
-//     int body_count)
-// {
-//     std::ifstream file(filename);
-//     if (!file.is_open()) {
-//         std::cerr << "Error: Could not open file " << filename << std::endl;
-//         return false;
-//     }
-
-//     // 1. Read the header line to map column names to indices
-//     std::string header_line;
-//     if (!std::getline(file, header_line)) {
-//         std::cerr << "Error: CSV file is empty or cannot be read." << std::endl;
-//         return false;
-//     }
-//     std::stringstream header_ss(header_line);
-//     std::string header;
-//     std::unordered_map<std::string, int> column_map;
-//     int col_idx = 0;
-//     while (std::getline(header_ss, header, ',')) {
-//         // Trim whitespace/carriage returns
-//         header.erase(header.find_last_not_of(" \n\r\t")+1);
-//         column_map[header] = col_idx++;
-//     }
-
-//     // 2. Validate that all required headers are present
-//     std::vector<std::string> required_headers = {
-//         "mass", "pos_x", "pos_y", "pos_z", "vel_x", "vel_y", "vel_z"
-//     };
-//     for (const auto& req : required_headers) {
-//         if (column_map.find(req) == column_map.end()) {
-//             std::cerr << "Error: Missing required header in CSV file: " << req << std::endl;
-//             return false;
-//         }
-//     }
-
-//     // Clear output vectors
-//     ids.clear();
-//     masses.clear();
-//     positions.clear();
-//     velocities.clear();
-
-//     // 3. Read data rows using the header map
-//     std::string line;
-//     uint64_t current_id = 0;
-//     int bodies_read = 0;
-//     while (std::getline(file, line)) {
-//         if (body_count > 0 && bodies_read >= body_count) {
-//             break;
-//         }
-
-//         std::stringstream line_ss(line);
-//         std::string field;
-//         std::vector<std::string> fields;
-//         while (std::getline(line_ss, field, ',')) {
-//             fields.push_back(field);
-//         }
-
-//         if (fields.size() < column_map.size()) continue; // Skip malformed lines
-
-//         try {
-//             // Access data using the map, not by fixed order
-//             double m  = std::stod(fields.at(column_map.at("mass")));
-//             double px = std::stod(fields.at(column_map.at("pos_x")));
-//             double py = std::stod(fields.at(column_map.at("pos_y")));
-//             double pz = std::stod(fields.at(column_map.at("pos_z")));
-//             double vx = std::stod(fields.at(column_map.at("vel_x")));
-//             double vy = std::stod(fields.at(column_map.at("vel_y")));
-//             double vz = std::stod(fields.at(column_map.at("vel_z")));
-
-//             // Store the parsed values
-//             masses.push_back(m);
-//             positions.push_back({px, py, pz});
-//             velocities.push_back({vx, vy, vz});
-
-//             // Generate a persistent ID
-//             ids.push_back(current_id++);
-//             bodies_read++;
-
-//         } catch (const std::exception& e) {
-//             std::cerr << "Warning: Could not parse line, skipping: \"" << line << "\"\n";
-//         }
-//     }
-//     return true;
-// }
