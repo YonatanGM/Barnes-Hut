@@ -1,4 +1,6 @@
 #include "io.h"
+#include <mpi.h>
+#include <omp.h>
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -520,14 +522,14 @@ void updateReceivedLETPVDFile(const cxxopts::ParseResult& args,
 void writeHistogram(int vis_step,
                     const std::vector<std::pair<long long, int>>& hist,
                     const BoundingBox& global_bb,
-                    const std::string& out_dir)
+                    const std::string& out_dir,
+                    int bucket_bits)
 {
     using namespace tinyxml2;
     namespace fs = std::filesystem;
 
-    constexpr int BUCKET_BITS = 18;
-    constexpr int BUCKET_DEPTH = BUCKET_BITS / 3;
-
+    int bucket_depth = bucket_bits / 3;
+    // std::cout << "DEBUG (Rank " << MPI_COMM_WORLD << "): writeHistogram using BUCKET_BITS = " << bucket_bits << " and BUCKET_DEPTH = " << bucket_depth << std::endl;
     // Collect data only for the non-empty histogram cells
     std::vector<BoundingBox> cell_boxes;
     std::vector<long long> cell_counts;
@@ -535,8 +537,8 @@ void writeHistogram(int vis_step,
 
     for (size_t i = 0; i < hist.size(); ++i) {
         if (hist[i].first > 0) { // .first is particle_count
-            uint64_t prefix = static_cast<uint64_t>(i) << (63 - BUCKET_BITS);
-            OctreeKey key = {prefix, (uint8_t)BUCKET_DEPTH};
+            uint64_t prefix = static_cast<uint64_t>(i) << (63 - bucket_bits);
+            OctreeKey key = {prefix, (uint8_t)bucket_depth};
             cell_boxes.push_back(getBoundingBoxForCell(key, global_bb));
             cell_counts.push_back(hist[i].first);
             cell_ranks.push_back(hist[i].second); // .second is assigned_rank
@@ -708,4 +710,71 @@ void updateHistogramPVDFile(const cxxopts::ParseResult& args,
     collection->InsertEndChild(dataSet);
 
     doc.SaveFile(pvdPath.c_str());
+}
+
+
+void saveReferenceCSV(const std::string& dir, const std::vector<Position>& positions, const std::vector<uint64_t>& ids) {
+    std::ofstream os(std::filesystem::path(dir) / "final_ref.csv");
+    os << "id,x,y,z\n";
+    for (size_t i = 0; i < positions.size(); ++i) {
+        os << ids[i] << "," << positions[i].x << "," << positions[i].y << "," << positions[i].z << "\n";
+    }
+}
+
+// MODIFIED: The load function now reads IDs correctly.
+std::vector<Position> loadReferenceCSV(const std::string& dir, int num_bodies) {
+    std::ifstream is(std::filesystem::path(dir) / "final_ref.csv");
+    if (!is.is_open()) {
+        throw std::runtime_error("Could not open reference CSV: " + dir + "/final_ref.csv");
+    }
+
+    std::string line;
+    std::getline(is, line); // Skip header
+
+    std::vector<Position> pos(num_bodies);
+    while (std::getline(is, line)) {
+        std::stringstream ss(line);
+        std::string field;
+
+        std::getline(ss, field, ',');
+        uint64_t id = std::stoull(field);
+
+        std::getline(ss, field, ',');
+        double x = std::stod(field);
+
+        std::getline(ss, field, ',');
+        double y = std::stod(field);
+
+        std::getline(ss, field, ',');
+        double z = std::stod(field);
+
+        if (id < static_cast<uint64_t>(num_bodies)) {
+            pos[id] = {x, y, z};
+        }
+    }
+    return pos;
+}
+
+// MODIFIED: This function now calculates the local sum and performs a global reduction.
+double computeDistanceSum(const std::vector<Position>& local_pos, const std::vector<uint64_t>& local_ids, const std::vector<Position>& ref_pos) {
+    // 1. Calculate the local sum of distances based on body IDs.
+    double local_sum = 0.0;
+    for (size_t i = 0; i < local_pos.size(); ++i) {
+        uint64_t id = local_ids[i];
+        if (id < ref_pos.size()) {
+            const Position& p1 = local_pos[i];
+            const Position& p2 = ref_pos[id];
+            double dx = p1.x - p2.x;
+            double dy = p1.y - p2.y;
+            double dz = p1.z - p2.z;
+            local_sum += std::sqrt(dx*dx + dy*dy + dz*dz);
+        }
+    }
+
+    // 2. Perform a reduction to get the global sum on rank 0.
+    double global_sum = 0.0;
+    MPI_Reduce(&local_sum, &global_sum, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    // 3. Return the global sum (only meaningful on rank 0).
+    return global_sum;
 }

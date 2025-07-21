@@ -40,7 +40,8 @@ void exchangeEssentialTrees(
     int                                     rank,
     int                                     size,
     const std::vector<std::vector<uint64_t>>& rank_domain_keys,
-    int                                     max_traversal_depth);
+    int                                     max_traversal_depth,
+    int                                     bucket_bits);
 
 
 

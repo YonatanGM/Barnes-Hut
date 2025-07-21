@@ -28,6 +28,7 @@ void exchangeFullTrees(const OctreeMap &local_tree, OctreeMap &full_tree,
     mergeRecordsIntoTree(full_tree, recv_buf);
 }
 
+
 void exchangeEssentialTrees(
     const OctreeMap&                        local_tree,
     std::vector<NodeRecord>&                remote_nodes,
@@ -38,10 +39,11 @@ void exchangeEssentialTrees(
     int                                     rank,
     int                                     size,
     const std::vector<std::vector<uint64_t>>& rank_domain_keys,
-    int                                     max_traversal_depth)
+    int                                     max_traversal_depth,
+    int                                     bucket_bits)
 {
-    constexpr int BUCKET_BITS  = 18;
-    constexpr int BUCKET_DEPTH = BUCKET_BITS/3;
+
+    int bucket_depth = bucket_bits/3;
 
     // build per rank bucket AABBs with correct anisotropic dimensions
     std::vector<std::vector<BoundingBox>> bucket_boxes(size);
@@ -49,14 +51,14 @@ void exchangeEssentialTrees(
     double dy   = global_bb.max.y - global_bb.min.y;
     double dz   = global_bb.max.z - global_bb.min.z;
 
-    double cellX = dx / (1 << BUCKET_DEPTH);
-    double cellY = dy / (1 << BUCKET_DEPTH);
-    double cellZ = dz / (1 << BUCKET_DEPTH);
+    double cellX = dx / (1 << bucket_depth);
+    double cellY = dy / (1 << bucket_depth);
+    double cellZ = dz / (1 << bucket_depth);
 
     for(int r=0; r<size; ++r){
       bucket_boxes[r].reserve(rank_domain_keys[r].size());
       for(auto pref: rank_domain_keys[r]){
-        Position n = key_to_normalized_position(pref, BUCKET_DEPTH);
+        Position n = key_to_normalized_position(pref, bucket_depth);
         BoundingBox bb;
         bb.min.x = global_bb.min.x + n.x * dx;
         bb.min.y = global_bb.min.y + n.y * dy;

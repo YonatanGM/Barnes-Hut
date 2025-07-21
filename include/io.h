@@ -77,9 +77,14 @@ void updateReceivedLETPVDFile(const cxxopts::ParseResult& args,
 void writeHistogram(int vis_step,
                     const std::vector<std::pair<long long, int>>& hist,
                     const BoundingBox& global_bb,
-                    const std::string& out_dir);
+                    const std::string& out_dir,
+                    int bucket_bits);
 
 void updateHistogramPVDFile(const cxxopts::ParseResult& args,
                             int vs_counter,
                             double current_time,
                             const std::string& out_dir);
+
+void saveReferenceCSV(const std::string& dir, const std::vector<Position>& positions, const std::vector<uint64_t>& ids);
+std::vector<Position> loadReferenceCSV(const std::string& dir, int num_bodies);
+double computeDistanceSum(const std::vector<Position>& local_pos, const std::vector<uint64_t>& local_ids, const std::vector<Position>& ref_pos);

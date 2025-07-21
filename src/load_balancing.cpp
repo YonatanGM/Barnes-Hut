@@ -3,7 +3,143 @@
 #include <algorithm>
 #include <cassert>
 
+#include "load_balancing.h"
+#include <numeric>
+#include <algorithm>
+#include <cassert>
 
+
+void update_rank_domains(
+    int size,
+    const std::vector<uint64_t>& codes,
+    int bucket_bits,
+    std::vector<std::vector<uint64_t>>& out_rank_domain_keys,
+    std::vector<std::pair<long long, int>>& out_global_hist,
+    std::vector<int>& out_splitters) {
+
+    int NUM_BUCKETS  = 1 << bucket_bits;
+
+    // build local histogram and reduce to global
+    std::vector<long long> local_hist(NUM_BUCKETS, 0);
+    for (uint64_t key : codes) {
+        unsigned bucket_idx = key >> (63 - bucket_bits);
+        ++local_hist[bucket_idx];
+    }
+    std::vector<long long> global_hist(NUM_BUCKETS, 0);
+    MPI_Allreduce(local_hist.data(), global_hist.data(), NUM_BUCKETS,
+                  MPI_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
+
+    // choose P‑1 splitter buckets (inclusive)
+    long long total_particles = std::accumulate(global_hist.begin(),
+                                                global_hist.end(), 0LL);
+    const long long ideal = (total_particles + size - 1) / size; // ceil
+
+    // NOTE: The name 'splitters' is changed to 'out_splitters' to match the output parameter.
+    // The logic is identical to the original.
+    out_splitters.clear();
+    out_splitters.reserve(size - 1);
+
+    long long run_sum = 0;
+    for (int i = 0; i < NUM_BUCKETS && out_splitters.size() < static_cast<size_t>(size - 1); ++i) {
+        run_sum += global_hist[i];
+
+        if (run_sum >= static_cast<long long>(out_splitters.size() + 1) * ideal) {
+            out_splitters.push_back(i);
+        }
+    }
+
+    // NOTE: The output parameters are renamed here, but the logic is identical.
+    out_global_hist.resize(NUM_BUCKETS);
+    out_rank_domain_keys.assign(size, std::vector<uint64_t>());
+    for (int i = 0; i < NUM_BUCKETS; ++i) {
+        int dest_rank = std::upper_bound(out_splitters.begin(), out_splitters.end(), i) - out_splitters.begin();
+
+        out_global_hist[i].first = global_hist[i];
+        out_global_hist[i].second = dest_rank;
+
+        // Only consider buckets that actually contain particles
+        if (global_hist[i] > 0) {
+            uint64_t bucket_prefix = static_cast<uint64_t>(i) << (63 - bucket_bits);
+            out_rank_domain_keys[dest_rank].push_back(bucket_prefix);
+        }
+    }
+}
+
+void rebalance_bodies(
+    int rank, int size,
+    const std::vector<int>& splitters,
+    const std::vector<uint64_t>& codes,
+    std::vector<Position> &local_pos,
+    std::vector<double> &local_mass,
+    std::vector<Velocity> &local_vel,
+    std::vector<uint64_t> &local_ids,
+    int bucket_bits) {
+
+    (void)rank;
+
+    // build send buffers  and Alltoallv migration
+    std::vector<int> send_counts(size, 0);
+    for (uint64_t key : codes) {
+        unsigned b = key >> (63 - bucket_bits);
+        int dest = std::upper_bound(splitters.begin(), splitters.end(),
+                                    static_cast<int>(b)) - splitters.begin();
+        ++send_counts[dest];
+    }
+
+    // prefix sums for send displacements
+    std::vector<int> sdispls(size, 0);
+    for (int i = 1; i < size; ++i) sdispls[i] = sdispls[i - 1] + send_counts[i - 1];
+    int total_send = sdispls.back() + send_counts.back();
+
+    // contiguous send buffers
+    std::vector<Position>  pos_send(total_send);
+    std::vector<double>    mass_send(total_send);
+    std::vector<Velocity>  vel_send(total_send);
+    std::vector<uint64_t>  ids_send(total_send);
+
+    // fill the send buffers in bucket order
+    std::vector<int> cursor = sdispls;
+    for (size_t i = 0; i < local_pos.size(); ++i) {
+        unsigned b = codes[i] >> (63 - bucket_bits);
+        int dest = std::upper_bound(splitters.begin(), splitters.end(),
+                                    static_cast<int>(b)) - splitters.begin();
+        int idx = cursor[dest]++;
+        pos_send[idx]  = local_pos[i];
+        mass_send[idx] = local_mass[i];
+        vel_send[idx]  = local_vel[i];
+        ids_send[idx]  = local_ids[i];
+    }
+
+    // Exchange counts
+    std::vector<int> recv_counts(size, 0);
+    MPI_Alltoall(send_counts.data(), 1, MPI_INT,
+                 recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+    // recv displacements and resize local vectors
+    std::vector<int> rdispls(size, 0);
+    for (int i = 1; i < size; ++i) rdispls[i] = rdispls[i - 1] + recv_counts[i - 1];
+    int total_recv = rdispls.back() + recv_counts.back();
+
+    local_pos.resize(total_recv);
+    local_mass.resize(total_recv);
+    local_vel.resize(total_recv);
+    local_ids.resize(total_recv);
+
+    // type handles
+    extern MPI_Datatype MPI_POSITION, MPI_VELOCITY, MPI_ID;
+
+    MPI_Alltoallv(pos_send.data(),  send_counts.data(), sdispls.data(), MPI_POSITION,
+                  local_pos.data(), recv_counts.data(), rdispls.data(), MPI_POSITION,
+                  MPI_COMM_WORLD);
+    MPI_Alltoallv(mass_send.data(), send_counts.data(), sdispls.data(), MPI_DOUBLE,
+                  local_mass.data(), recv_counts.data(), rdispls.data(), MPI_DOUBLE,
+                  MPI_COMM_WORLD);
+    MPI_Alltoallv(vel_send.data(),  send_counts.data(), sdispls.data(), MPI_VELOCITY,
+                  local_vel.data(), recv_counts.data(), rdispls.data(), MPI_VELOCITY,
+                  MPI_COMM_WORLD);
+    MPI_Alltoallv(ids_send.data(),  send_counts.data(), sdispls.data(), MPI_ID,
+                local_ids.data(), recv_counts.data(), rdispls.data(), MPI_ID, MPI_COMM_WORLD);
+}
 void rebalance_bodies(
     int rank, int size,
     std::vector<uint64_t> codes,

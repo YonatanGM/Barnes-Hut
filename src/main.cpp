@@ -27,9 +27,19 @@
 #include "policy.h"
 
 
+// Forward declarations
+double performReferenceAndErrorAnalysis(
+    bool is_reference,
+    const std::string& ref_dir,
+    int rank,
+    int size,
+    int N_total,
+    const std::vector<Position>& local_pos,
+    const std::vector<uint64_t>& local_ids);
 
-// Forward declarations of MPI datatypes
+// MPI datatypes
 MPI_Datatype MPI_POSITION, MPI_VELOCITY, MPI_ACCELERATION, MPI_NODE, MPI_ID, MPI_BoundingBox;
+
 
 int main(int argc, char **argv) {
     int provided;
@@ -37,7 +47,6 @@ int main(int argc, char **argv) {
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-
     // CLI parsing
     cxxopts::Options opt(argv[0], "Phase‑2 Barnes–Hut");
     opt.add_options()
@@ -52,7 +61,8 @@ int main(int argc, char **argv) {
         ("theta",     "BH opening angle",               cxxopts::value<double>()->default_value("1.05"))
         ("max-depth", "Maximum depth for LET traversal (0-21, 21 means full traversal)", cxxopts::value<int>()->default_value("21"))
         ("bucket-bits", "Number of bits for histogram buckets (2^n buckets)", cxxopts::value<int>()->default_value("18"))
-        ("rebalance-interval", "Steps between load rebalancing", cxxopts::value<int>()->default_value("24"));
+        ("rebalance-interval", "Steps between load rebalancing", cxxopts::value<int>()->default_value("24"))
+        ("r,reference", "Run as reference and save final positions", cxxopts::value<bool>()->default_value("false"));
 
     const auto args = opt.parse(argc, argv);
     if (args.count("help")) {
@@ -72,14 +82,30 @@ int main(int argc, char **argv) {
     const int bucket_bits = args["bucket-bits"].as<int>();
     const int rebalance_interval = args["rebalance-interval"].as<int>();
 
+
+    if (rank == 0) { // Only print from rank 0 to avoid clutter
+        // std::cout << "DEBUG (main.cpp): CLI parsed bucket_bits = " << bucket_bits << std::endl;
+    }
+
+    const bool is_reference = args["reference"].as<bool>();
+    const std::string ref_dir = "reference";
+
     FCPolicy fcPol;
     const std::string fc_str = args["fc"].as<std::string>();
-    if (fc_str == "tree") {
+
+    if (is_reference) {
         fcPol = FCPolicy::Tree;
-    } else if (fc_str == "let_direct") {
-        fcPol = FCPolicy::LET_DirectSum;
+        if (rank == 0) {
+            std::cout << "Running in reference mode. Force calculation method will be 'tree'." << std::endl;
+        }
     } else {
-        fcPol = FCPolicy::LET;
+        if (fc_str == "tree") {
+            fcPol = FCPolicy::Tree;
+        } else if (fc_str == "let_direct") {
+            fcPol = FCPolicy::LET_DirectSum;
+        } else {
+            fcPol = FCPolicy::LET;
+        }
     }
 
     // Load data on rank 0 then scatter
@@ -96,7 +122,11 @@ int main(int argc, char **argv) {
         if (!readCSV(args["file"].as<std::string>(), init_ids, init_mass, init_pos, init_vel, nbodies))
             MPI_Abort(MPI_COMM_WORLD, 1);
         std::cout << "Loaded " << init_mass.size() << " bodies\n";
-        std::filesystem::create_directories(out_dir); // Create output dir
+        std::filesystem::create_directories(out_dir);
+
+        if (is_reference) {
+            std::filesystem::create_directories(ref_dir);
+        }
     }
 
     // Broadcast total N
@@ -156,8 +186,8 @@ int main(int argc, char **argv) {
     auto last_vis_time = sim_start_time;
 
     std::vector<std::vector<uint64_t>> rank_domain_keys;
-    BoundingBox hist_global_bb;
     std::vector<std::pair<long long, int>> last_global_hist;
+
     for (int step = 0; t < t_end; ++step, t += dt) {
         // 1. half kick
         if (t > 0) {
@@ -177,22 +207,32 @@ int main(int argc, char **argv) {
             local_pos[i].z += dt * local_vel[i].z;
         }
 
-        // 3. Load balance
+        // 3. Domain decomposition and load balancing
+        // 3a. Calculate the BBox and Morton codes for the current particle state.
+        BoundingBox local_bb = compute_local_bbox(local_pos);
+        BoundingBox global_bb = compute_global_bbox(local_bb);
+        BoundingBox bbox_for_histogram_vis = global_bb;
+        std::vector<uint64_t> codes = generateMortonCodes(local_pos, global_bb);
+
+        // 3b. Update domain decomposition every step for LET accuracy
+        std::vector<int> splitters;
+        update_rank_domains(size, codes, bucket_bits, rank_domain_keys, last_global_hist, splitters);
+
+         // 3c. Body migration periodically
         if (step % rebalance_interval == 0) {
             if (rank == 0) std::cout << "Step " << step << ": Rebalancing particles...\n";
 
-            BoundingBox current_local_bb = compute_local_bbox(local_pos);
-            BoundingBox current_global_bb = compute_global_bbox(current_local_bb);
-            hist_global_bb = current_global_bb;
-            std::vector<uint64_t> current_codes = generateMortonCodes(local_pos, current_global_bb);
-            rebalance_bodies(rank, size, current_codes, local_pos, local_mass, local_vel, local_ids, rank_domain_keys, last_global_hist, bucket_bits);
+            rebalance_bodies(rank, size, splitters, codes,
+                             local_pos, local_mass, local_vel, local_ids,
+                             bucket_bits);
+
+            // After rebalancing, we must recacluate the BBox and codes
+            local_bb = compute_local_bbox(local_pos);
+            global_bb = compute_global_bbox(local_bb);
+            codes = generateMortonCodes(local_pos, global_bb);
         }
 
         // 4. prepare for tree build
-        BoundingBox local_bb = compute_local_bbox(local_pos);
-        BoundingBox global_bb = compute_global_bbox(local_bb);
-
-        std::vector<uint64_t> codes = generateMortonCodes(local_pos, global_bb);
         sortBodiesByMortonKey(codes, local_pos, local_mass, local_vel, local_ids);
 
         // 5. build local tree
@@ -208,10 +248,10 @@ int main(int argc, char **argv) {
                 exchangeFullTrees(my_tree, full_tree, MPI_NODE, rank, size);
                 break;
             case FCPolicy::LET:
-                exchangeEssentialTrees(my_tree, remote_nodes, remote_node_counts, global_bb, theta, MPI_NODE, rank, size, rank_domain_keys, max_let_depth);
+                exchangeEssentialTrees(my_tree, remote_nodes, remote_node_counts, global_bb, theta, MPI_NODE, rank, size, rank_domain_keys, max_let_depth, bucket_bits);
                 break;
             case FCPolicy::LET_DirectSum:
-                exchangeEssentialTrees(my_tree, remote_nodes, remote_node_counts, global_bb, theta, MPI_NODE, rank, size, rank_domain_keys, max_let_depth);
+                exchangeEssentialTrees(my_tree, remote_nodes, remote_node_counts, global_bb, theta, MPI_NODE, rank, size, rank_domain_keys, max_let_depth, bucket_bits);
                 break;
             default:
                 MPI_Abort(MPI_COMM_WORLD, 999);
@@ -224,12 +264,10 @@ int main(int argc, char **argv) {
                 break;
 
             case FCPolicy::LET:
-                // Assumes you've renamed the merge-based function
                 computeAccelerationsWithLET(my_tree, remote_nodes, codes, local_pos, theta, G, 0.0, global_bb, local_acc, rank);
                 break;
 
             case FCPolicy::LET_DirectSum:
-                // Call your newly renamed function here
                 computeAccelerationsWithRemoteDirectSum(my_tree, remote_nodes, codes, local_pos, theta, G, 0.0, global_bb, local_acc);
                 break;
         }
@@ -253,7 +291,7 @@ int main(int argc, char **argv) {
 
             if (rank == 0 && !last_global_hist.empty()) {
                 // global_bb is computed right before tree building, so it's available and current
-                writeHistogram(vis_step, last_global_hist, hist_global_bb, out_dir);
+                writeHistogram(vis_step, last_global_hist, bbox_for_histogram_vis, out_dir, bucket_bits);
             }
 
             MPI_Barrier(MPI_COMM_WORLD);
@@ -283,10 +321,17 @@ int main(int argc, char **argv) {
     }
 
     auto sim_end_time = std::chrono::high_resolution_clock::now();
+
+    double summed_dist_error = performReferenceAndErrorAnalysis(
+        is_reference, ref_dir, rank, size, N_total, local_pos, local_ids
+    );
+
+
     if (rank == 0) {
-        std::cout << "Simulation finished.\n";
         auto total_sim_duration_s = std::chrono::duration_cast<std::chrono::duration<double>>(sim_end_time - sim_start_time).count();
-        std::cout << "Total simulation time: " << std::fixed << std::setprecision(2) << total_sim_duration_s << " s\n";
+        std::cout << std::fixed << std::setprecision(4);
+        std::cout << "TOTAL_TIME          " << total_sim_duration_s << std::endl;
+        std::cout << "SUMMED_DIST_ERROR   " << summed_dist_error << std::endl;
     }
 
     // Cleanup
@@ -297,4 +342,76 @@ int main(int argc, char **argv) {
     MPI_Type_free(&MPI_NODE);
     MPI_Finalize();
     return 0;
+}
+
+
+
+/**
+ * @brief either saves a reference file or computes error against it
+ * @return The total summed distance error
+ */
+double performReferenceAndErrorAnalysis(
+    bool is_reference,
+    const std::string& ref_dir,
+    int rank,
+    int size,
+    int N_total,
+    const std::vector<Position>& local_pos,
+    const std::vector<uint64_t>& local_ids)
+{
+    double summed_dist_error = 0.0;
+
+    if (is_reference) {
+        // First, get the final, correct counts from each rank after any rebalancing.
+        int local_count = local_pos.size();
+        std::vector<int> final_counts;
+        if (rank == 0) {
+            final_counts.resize(size);
+        }
+        MPI_Gather(&local_count, 1, MPI_INT, final_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+        // On rank 0, calculate the correct displacements for the Gatherv.
+        std::vector<int> final_displs;
+        if (rank == 0) {
+            final_displs.resize(size);
+            final_displs[0] = 0;
+            for (int i = 1; i < size; ++i) {
+                final_displs[i] = final_displs[i - 1] + final_counts[i - 1];
+            }
+        }
+
+        // Now perform the Gatherv with the correct counts and displacements.
+        std::vector<Position> final_positions;
+        std::vector<uint64_t> final_ids;
+        if (rank == 0) {
+            final_positions.resize(N_total);
+            final_ids.resize(N_total);
+        }
+
+        MPI_Gatherv(local_pos.data(), local_count, MPI_POSITION,
+                    final_positions.data(), final_counts.data(), final_displs.data(), MPI_POSITION,
+                    0, MPI_COMM_WORLD);
+        MPI_Gatherv(local_ids.data(), local_count, MPI_ID,
+                    final_ids.data(), final_counts.data(), final_displs.data(), MPI_ID,
+                    0, MPI_COMM_WORLD);
+
+        if (rank == 0) {
+            saveReferenceCSV(ref_dir, final_positions, final_ids);
+            std::cout << "Reference positions saved to " << ref_dir << "/final_ref.csv" << std::endl;
+        }
+    } else {
+        // In a normal run, check for the reference file and compute the error in a distributed manner.
+        if (std::filesystem::exists(std::filesystem::path(ref_dir) / "final_ref.csv")) {
+            try {
+                std::vector<Position> ref_positions = loadReferenceCSV(ref_dir, N_total);
+                summed_dist_error = computeDistanceSum(local_pos, local_ids, ref_positions);
+            } catch (const std::runtime_error& e) {
+                if (rank == 0) std::cerr << "Error during error analysis: " << e.what() << std::endl;
+                MPI_Abort(MPI_COMM_WORLD, 1);
+            }
+        } else {
+            if (rank == 0) std::cout << "Reference file not found at " << ref_dir << "/final_ref.csv, skipping error analysis." << std::endl;
+        }
+    }
+    return summed_dist_error;
 }

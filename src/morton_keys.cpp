@@ -82,6 +82,7 @@ std::vector<uint64_t> generateMortonCodes(const std::vector<Position>& raw, cons
         return t;
     };
 
+    #pragma omp parallel for
     for (std::size_t i = 0; i < n; ++i)
     {
         double xn = norm(raw[i].x, box.min.x, dx);
