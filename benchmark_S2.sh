@@ -51,7 +51,7 @@ data_let_direct_bodies_file="${benchmark_dir}/data_let_direct_bodies.dat" # New 
 max_depth_values=(2 4 8 12 16 21)
 bucket_bits_values=(3 9 12 15 18 21)
 node_counts=(1 2 3 4)
-body_counts=(10000 50000 100000 200000 300000)
+body_counts=(1000 10000 50000 100000 200000 300000)
 rebalance_values=(1 5 10 24 50 9999999)
 
 # --- Fixed Parameters for Control Runs ---
