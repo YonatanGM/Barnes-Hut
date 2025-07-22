@@ -18,15 +18,15 @@ set -x
 #                             BENCHMARK CONFIGURATION
 # ==============================================================================
 # --- Simulation Parameters ---
-file="../data/state_vectors_csvs/scenario2_300149.csv"
+file="../data/state_vectors_csvs/scenario2_1000000.csv"
 dt="1h"
-tend="20d" # Longer duration for rebalancing analysis
-vs="2d"    # More frequent visualization for analysis
+tend="5d" # Longer duration for rebalancing analysis
+vs="1d"    # More frequent visualization for analysis
 theta="1.05"
 
 # --- Benchmark Directory Setup ---
 sanitized_file=$(basename "$file" .csv | tr -c 'A-Za-z0-9' '_')
-benchmark_dir="benchmark_S2_${SLURM_JOB_ID}"
+benchmark_dir="benchmark_S3_${SLURM_JOB_ID}"
 mkdir -p "$benchmark_dir/vs_outputs"
 
 # --- Data and Plot Files ---
@@ -51,11 +51,11 @@ data_let_direct_bodies_file="${benchmark_dir}/data_let_direct_bodies.dat" # New 
 max_depth_values=(2 4 8 12 16 21)
 bucket_bits_values=(3 9 12 15 18 21)
 node_counts=(1 2 3 4)
-body_counts=(1000 10000 50000 100000 200000 300000)
-rebalance_values=(1 5 10 24 50 9999999)
+body_counts=(1000 10000 50000 100000 200000 300000 600000 1000000 )
+rebalance_values=(1 5 10 24 48 9999999)
 
 # --- Fixed Parameters for Control Runs ---
-FIXED_BODIES=300000
+FIXED_BODIES=1000000
 FIXED_NODES=4
 FIXED_THREADS=48
 FIXED_MAX_DEPTH=21
@@ -177,15 +177,15 @@ for bits in "${bucket_bits_values[@]}"; do
     echo "$bits $total_time $dist_error" >> "${OLDPWD}/${data_bucket_bits_file}"
 done
 
-echo "============================================================"
-echo "PHASE 3: Runtime & Error vs. MPI Node Count"
-echo "============================================================"
-for nodes in "${node_counts[@]}"; do
-    metrics=$(run_simulation "$FIXED_BODIES" "$nodes" "$FIXED_THREADS" "$FIXED_MAX_DEPTH" "$FIXED_REBALANCE" "$FIXED_FC_POLICY" "false" "$FIXED_BUCKET_BITS" "nodes" "n_${nodes}")
-    total_time=$(echo "$metrics" | awk '{print $1}')
-    dist_error=$(echo "$metrics" | awk '{print $2}')
-    echo "$nodes $total_time $dist_error" >> "${OLDPWD}/${data_nodes_file}"
-done
+# echo "============================================================"
+# echo "PHASE 3: Runtime & Error vs. MPI Node Count"
+# echo "============================================================"
+# for nodes in "${node_counts[@]}"; do
+#     metrics=$(run_simulation "$FIXED_BODIES" "$nodes" "$FIXED_THREADS" "$FIXED_MAX_DEPTH" "$FIXED_REBALANCE" "$FIXED_FC_POLICY" "false" "$FIXED_BUCKET_BITS" "nodes" "n_${nodes}")
+#     total_time=$(echo "$metrics" | awk '{print $1}')
+#     dist_error=$(echo "$metrics" | awk '{print $2}')
+#     echo "$nodes $total_time $dist_error" >> "${OLDPWD}/${data_nodes_file}"
+# done
 
 echo "============================================================"
 echo "PHASE 4: Runtime & Error vs. Body Count (FC=let)"
@@ -197,15 +197,15 @@ for bodies in "${body_counts[@]}"; do
     echo "$bodies $total_time $dist_error" >> "${OLDPWD}/${data_bodies_file}"
 done
 
-echo "============================================================"
-echo "PHASE 5: Runtime & Error vs. Rebalance Interval"
-echo "============================================================"
-for interval in "${rebalance_values[@]}"; do
-    metrics=$(run_simulation "$FIXED_BODIES" "$FIXED_NODES" "$FIXED_THREADS" "$FIXED_MAX_DEPTH" "$interval" "$FIXED_FC_POLICY" "false" "$FIXED_BUCKET_BITS" "rebalance" "i_${interval}")
-    total_time=$(echo "$metrics" | awk '{print $1}')
-    dist_error=$(echo "$metrics" | awk '{print $2}')
-    echo "$interval $total_time $dist_error" >> "${OLDPWD}/${data_rebalance_file}"
-done
+# echo "============================================================"
+# echo "PHASE 5: Runtime & Error vs. Rebalance Interval"
+# echo "============================================================"
+# for interval in "${rebalance_values[@]}"; do
+#     metrics=$(run_simulation "$FIXED_BODIES" "$FIXED_NODES" "$FIXED_THREADS" "$FIXED_MAX_DEPTH" "$interval" "$FIXED_FC_POLICY" "false" "$FIXED_BUCKET_BITS" "rebalance" "i_${interval}")
+#     total_time=$(echo "$metrics" | awk '{print $1}')
+#     dist_error=$(echo "$metrics" | awk '{print $2}')
+#     echo "$interval $total_time $dist_error" >> "${OLDPWD}/${data_rebalance_file}"
+# done
 
 echo "============================================================"
 echo "PHASE 6: Runtime & Error vs. Body Count (FC=let_direct)"
