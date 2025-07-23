@@ -27,8 +27,16 @@ theta="1.05"
 # --- Benchmark Directory Setup ---
 sanitized_file=$(basename "$file" .csv | tr -c 'A-Za-z0-9' '_')
 benchmark_dir="benchmark_S2_${SLURM_JOB_ID}"
-mkdir -p "$benchmark_dir/vs_outputs"
+# --- NEW: Real location lives on scratch ---
+SCRATCH_ROOT=/data/scratch-simcl1/$USER
+REAL_DIR="${SCRATCH_ROOT}/${benchmark_dir}"
 
+mkdir -p "${REAL_DIR}/vs_outputs"   # Create the real folders on scratch
+ln -sfn "${REAL_DIR}" "${benchmark_dir}"
+# This creates a symlink in the current directory:
+# ./benchmark_S1_<jobid>  →  /data/scratch-simcl1/$USER/benchmark_S1_<jobid>
+# All script operations on benchmark_dir will now transparently write to scratch.
+# ---------------------------------------------------------------------------
 # --- Data and Plot Files ---
 data_max_depth_file="${benchmark_dir}/data_max_depth.dat"
 plot_max_depth_file="${benchmark_dir}/plot_max_depth.png"
