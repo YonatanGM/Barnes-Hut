@@ -2,7 +2,7 @@
 
 #SBATCH --partition=all
 #SBATCH --nodelist=simcl1n[1-4]
-#SBATCH --job-name="benchmark_S1_new"
+#SBATCH --job-name="benchmark_S1"
 #SBATCH --output=benchmark_S1_new.out
 #SBATCH --error=benchmark_S1_new.err
 #SBATCH --time=2-00:00:00
