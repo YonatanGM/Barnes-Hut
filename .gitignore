@@ -89,3 +89,9 @@ __pycache__/
 
 *.code-workspace
 structure.txt
+
+*.avi
+*.mp4
+*.mov
+data/scenario2.csv
+
