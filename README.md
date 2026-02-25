@@ -3,6 +3,8 @@
 <!-- [![Pipeline Status](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/badges/main/pipeline.svg)](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/-/pipelines)
 [![Coverage](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/badges/main/coverage.svg)](https://gitlab-sim.informatik.uni-stuttgart.de/mamoyn/implementation/-/pipelines) -->
 
+[demo](./bh-demo.gif)
+
 ## How to build
 
 To build the project, run:
